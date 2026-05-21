@@ -1,127 +1,159 @@
 import os
 import logging
 import urllib.parse
+import json
+import re
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 from groq import Groq
 
-# Logging set up karein
+# Logging set up
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# Environment variables uthayein
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-# Groq client initialize
 groq_client = Groq(api_key=GROQ_API_KEY)
 
 # --- 1. START COMMAND ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_text = (
-        "👋 **Welcome to your Ultimate JEE/NEET AI Assistant!** 🔥\n\n"
-        "Main aapki padhai ko ekdam aasan aur mazedar bana dunga. Mere paas ye sabhi Super Powers hain:\n\n"
-        "🗣️ **Hinglish Support:** Main aapse desi style mein baat karunga.\n"
-        "🖼️ **Direct Photos:** Kisi bhi topic ke aage 'photo' ya 'diagram' likho, main real image bhejunga!\n"
-        "🎯 **Live Quiz:** Type karo `/quiz` aur apna test shuru karo.\n"
-        "📚 **Short Notes:** Type karo `/notes` formula sheets ke liye.\n"
-        "🎤 **Voice Notes:** Aap voice message bhejkar bhi help le sakte hain!\n\n"
-        "Poochho, kya doubt hai aapka aaj? 🚀"
+        "👋 **Hello Dost! Main hoon Padaiwala Dost (V2.0 Advance)!** 🔥\n\n"
+        "Ab main pehle se zyada smart aur advanced ho gaya hoon. Dekho ab main kya-kya kar sakta hoon:\n\n"
+        "🧠 **AI Dynamic Quiz:** `/quiz` type karo, aur main Groq AI se live naye JEE/NEET MCQs generate karunga.\n"
+        "🖼️ **Instant HD Diagrams:** Kuch bhi padhte waqt 'photo' ya 'diagram' maango, instant visual hazir.\n"
+        "⚡ **JEE/NEET Hacks:** Main aapko shortcuts, formulas aur step-by-step derivations bhi samjhaunga.\n\n"
+        "Chalo, taiyari shuru karein? Koi bhi sawaal pucho ya `/quiz` se test lo! 🚀"
     )
     await update.message.reply_text(welcome_text, parse_mode="Markdown")
 
-# --- 2. QUIZ MODE FEATURE (`/quiz`) ---
+# --- 2. ADVANCED AI-POWERED QUIZ GENERATOR ---
 async def quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        [InlineKeyboardButton("🌌 Physics", callback_data='quiz_physics')],
-        [InlineKeyboardButton("🧪 Chemistry", callback_data='quiz_chemistry')],
-        [InlineKeyboardButton("🧬 Biology", callback_data='quiz_biology')]
+        [InlineKeyboardButton("🌌 Physics", callback_data='subj_physics')],
+        [InlineKeyboardButton("🧪 Chemistry", callback_data='subj_chemistry')],
+        [InlineKeyboardButton("🧬 Biology", callback_data='subj_biology')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("🎯 **Chalo ek test lete hain!** Apna favourite subject chuno:", reply_markup=reply_markup, parse_mode="Markdown")
+    await update.message.reply_text("🎯 **Let's generate a Live AI Quiz!** Apna subject chuno:", reply_markup=reply_markup, parse_mode="Markdown")
 
-async def quiz_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def subject_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    data = query.data
+    subject = query.data.split('_')[1]
+    
+    await query.edit_message_text(text=f"🔄 **Groq AI se fresh JEE/NEET {subject.capitalize()} ka question generate ho raha hai...** Ek second ruko.")
 
-    # Dummy Question bank based on selected subject (Inhe aap baad mein aur badha sakte hain)
-    if data == 'quiz_physics':
-        question = "❓ **Physics Question:** What is the SI unit of Electric Current?\n\nA) Volt\nB) Ampere\nC) Ohm\nD) Watt"
-        keyboard = [[InlineKeyboardButton("A", callback_data='q_wrong'), InlineKeyboardButton("B", callback_data='q_correct')],
-                    [InlineKeyboardButton("C", callback_data='q_wrong'), InlineKeyboardButton("D", callback_data='q_wrong')]]
-    elif data == 'quiz_chemistry':
-        question = "❓ **Chemistry Question:** What is the pH value of pure water?\n\nA) 5\nB) 7\nC) 9\nD) 14"
-        keyboard = [[InlineKeyboardButton("A", callback_data='q_wrong'), InlineKeyboardButton("B", callback_data='q_correct')],
-                    [InlineKeyboardButton("C", callback_data='q_wrong'), InlineKeyboardButton("D", callback_data='q_wrong')]]
-    else:
-        question = "❓ **Biology Question:** Which organelle is known as the Powerhouse of the Cell?\n\nA) Nucleus\nB) Ribosome\nC) Mitochondria\nD) Chloroplast"
-        keyboard = [[InlineKeyboardButton("A", callback_data='q_wrong'), InlineKeyboardButton("B", callback_data='q_wrong')],
-                    [InlineKeyboardButton("C", callback_data='q_correct'), InlineKeyboardButton("D", callback_data='q_wrong')]]
+    try:
+        # Groq AI se strict JSON format mein question mangna
+        prompt = (
+            f"Generate one high-quality multiple-choice question (MCQ) for JEE/NEET level {subject}. "
+            "Provide the response strictly in JSON format with keys: 'question', 'A', 'B', 'C', 'D', 'correct_option', 'explanation'. "
+            "Keep the language of explanation in conversational Hinglish, but the question and options in technical English. "
+            "Ensure the correct_option is exactly one letter: 'A', 'B', 'C', or 'D'."
+        )
+        
+        completion = groq_client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt}],
+            model="llama-3.1-8b-instant",
+            temperature=0.7,
+            response_format={"type": "json_object"}
+        )
+        
+        quiz_data = json.loads(completion.choices[0].message.content)
+        
+        # Format the question output
+        formatted_question = (
+            f"🎯 **JEE/NEET {subject.capitalize()} Challenge!**\n\n"
+            f"❓ {quiz_data['question']}\n\n"
+            f"🅰️ {quiz_data['A']}\n"
+            f"🅱️ {quiz_data['B']}\n"
+            f"🆃 {quiz_data['C']}\n"
+            f"🅳 {quiz_data['D']}\n"
+        )
+        
+        # Save exact details in user_data for evaluation later
+        context.user_data['correct'] = quiz_data['correct_option'].strip().upper()
+        context.user_data['explanation'] = quiz_data['explanation']
+        
+        keyboard = [
+            [InlineKeyboardButton("A", callback_data='ans_A'), InlineKeyboardButton("B", callback_data='ans_B')],
+            [InlineKeyboardButton("C", callback_data='ans_C'), InlineKeyboardButton("D", callback_data='ans_D')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(text=formatted_question, reply_markup=reply_markup, parse_mode="Markdown")
+        
+    except Exception as e:
+        logging.error(f"Quiz Gen Error: {e}")
+        await query.edit_message_text(text="❌ Sawaal banane mein thodi dikkat aayi. Ek baar fir se `/quiz` try karo bro!")
 
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(text=question, reply_markup=reply_markup, parse_mode="Markdown")
-
-async def answer_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def check_answer_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    if query.data == 'q_correct':
-        await query.edit_message_text(text="🎉 **Sahi Jawab! Excellent!** Aapki taiyari bohot achhi chal rahi hai. 🔥 10/10")
+    
+    user_ans = query.data.split('_')[1]
+    correct_ans = context.user_data.get('correct', 'A')
+    explanation = context.user_data.get('explanation', 'Koi explanation available nahi hai.')
+    
+    if user_ans == correct_ans:
+        result_text = f"🎉 **💥 SAHI JAWAB! Brilliant!** Your choice ({user_ans}) is absolutely correct.\n\n"
     else:
-        await query.edit_message_text(text="❌ **Oh no! Galat Jawab.** Koi baat nahi, thoda aur revise karo aur dobara try karo! 👍")
+        result_text = f"❌ **OH NO! Galat Jawab.** Sahi option **{correct_ans}** tha.\n\n"
+        
+    result_text += f"💡 **Detailed Explanation (Hinglish):**\n{explanation}\n\n👉 Naya sawaal chahiye? Type karo `/quiz`!"
+    
+    await query.edit_message_text(text=result_text, parse_mode="Markdown")
 
 # --- 3. NOTES DOWNLOAD FEATURE (`/notes`) ---
 async def notes_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     notes_text = (
-        "📚 **JEE/NEET Quick Revision Resources:**\n\n"
-        "🔗 [Physics All Formulas PDF](https://t.me/Exam_Preparation_Notes) \n"
-        "🔗 [Chemistry Periodic Table & Reactions](https://t.me/Exam_Preparation_Notes)\n"
-        "🔗 [Biology Important Diagrams Sheet](https://t.me/Exam_Preparation_Notes)\n\n"
-        "*(Aap in links par click karke direct high-quality revision sheets download kar sakte ho!)* 📑"
+        "📚 **JEE/NEET Ultimate Revision Sheets:**\n\n"
+        "🔹 [Physics Formulas Cheat-Sheet](https://t.me/Exam_Preparation_Notes)\n"
+        "🔹 [Chemistry Organic Name Reactions](https://t.me/Exam_Preparation_Notes)\n"
+        "🔹 [Biology High-Yield Diagrams Guide](https://t.me/Exam_Preparation_Notes)\n\n"
+        "💡 *Tip: Revision sheets ko bookmarks mein save kar lo short-term studies ke liye!*"
     )
     await update.message.reply_text(notes_text, parse_mode="Markdown", disable_web_page_preview=True)
 
-# --- 4. TEXT & IMAGE GENERATION HANDLER ---
+# --- 4. ADVANCED TEXT & IMAGE HANDLER ---
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
     user_text_lower = user_text.lower()
     
-    # Check if user wants an image/diagram
-    trigger_words = ["photo", "image", "diagram", "chitra", "pic", "picture"]
+    trigger_words = ["photo", "image", "diagram", "chitra", "pic", "picture", "map"]
     if any(word in user_text_lower for word in trigger_words):
-        await update.message.reply_text("🖼️ Main aapke liye diagram/photo dhoodh kar generate kar raha hoon, 1 second ruko...")
+        await update.message.reply_text("🖼️ Main aapke liye textbook-style diagram create kar raha hoon, thoda sabr rakho...")
         try:
-            # Cleaning text to make a good image query
             query = user_text_lower
             for word in trigger_words:
                 query = query.replace(word, "")
             query = query.replace("mujhe", "").replace("dikhao", "").replace("ki", "").strip()
             
             if not query:
-                query = "science diagram"
+                query = "science concept"
                 
-            # Generating direct image link via Pollinations AI (Free & Instant)
-            encoded_query = urllib.parse.quote(f"clear educational scientific diagram of {query}, high quality, textbook style")
-            image_url = f"https://image.pollinations.ai/p/{encoded_query}?width=800&height=600&seed=42"
+            # Better prompt engineering for generating standard educational diagrams
+            encoded_query = urllib.parse.quote(f"clear detailed educational scientific labeled diagram of {query}, white background, crisp textbook illustration")
+            image_url = f"https://image.pollinations.ai/p/{encoded_query}?width=900&height=700&seed=100"
             
-            await update.message.reply_photo(photo=image_url, caption=f"📸 Ye raha aapka **{query.capitalize()}** ka visual diagram! Powered by AI. 🎯", parse_mode="Markdown")
+            await update.message.reply_photo(photo=image_url, caption=f"📸 **Here is your diagram for: {query.capitalize()}**\n\nPadhai ke liye best and clean layout structure. 🎯", parse_mode="Markdown")
             return
         except Exception as img_err:
-            logging.error(f"Image Error: {img_err}")
-            # Fallback if image fails, continue to text response
+            logging.error(f"Image Gen Error: {img_err}")
 
-    # Default: Send text query to Groq (Hinglish)
+    # Text completion handling (Advanced Hinglish Teacher Context)
     try:
         chat_completion = groq_client.chat.completions.create(
             messages=[
                 {
                     "role": "system",
                     "content": (
-                        "You are an elite, super-friendly AI educator for Indian JEE/NEET aspirants. "
+                        "You are an elite, highly interactive JEE/NEET personal mentor named 'Padaiwala Dost'. "
                         "Rules:\n"
-                        "1. Always reply in clean conversational Hinglish (Hindi + English mix).\n"
-                        "2. Use lots of emojis to keep the student motivated.\n"
-                        "3. Format answers with clear headings, bullets, and text-based tables if needed.\n"
-                        "4. Keep explanations extremely easy, using real-life examples."
+                        "1. Talk in friendly, enthusiastic Hinglish.\n"
+                        "2. Always simplify tough equations/concepts by using analogies, breakdowns, and points.\n"
+                        "3. Highlight critical formulas using markdown text code format so they stand out.\n"
+                        "4. End your response with a motivational one-liner or an engaging question related to the topic."
                     )
                 },
                 {
@@ -135,34 +167,32 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(reply)
     except Exception as e:
         logging.error(f"Groq Error: {e}")
-        await update.message.reply_text("❌ Oops! Groq Server busy hai. Please ek baar fir se try karein.")
+        await update.message.reply_text("❌ Server thoda busy ho gaya, please ek baar fir se try karo!")
 
-# --- 5. VOICE NOTE HANDLER ---
+# --- 5. VOICE NOTE COMPATIBILITY ---
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🎤 **Main aapka Voice Note sun raha hoon!**\n\n*(Voice-to-text processing feature set ho gaya hai. Aap apna doubt clear audio mein poochte rahiye, main jaldi hi ise text answer mein badal dunga!)* 👍")
+    await update.message.reply_text("🎤 **Aapka voice command received!** Main jaldi hi is audio feature ko backend transcribing se direct link kar dunga. Tab tak ke liye ek baar question type karke dekho dost! 👍")
 
-# --- MAIN APP FUNCTION ---
+# --- MAIN CONTROLLER ---
 def main():
     if not TOKEN or not GROQ_API_KEY:
-        logging.error("Variables missing from Railway!")
+        logging.error("Credentials missing!")
         return
 
     application = Application.builder().token(TOKEN).build()
     
-    # Handlers configuration
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("quiz", quiz_command))
     application.add_handler(CommandHandler("notes", notes_command))
     
-    # Callback queries for quiz buttons
-    application.add_handler(CallbackQueryHandler(quiz_callback, pattern='^quiz_'))
-    application.add_handler(CallbackQueryHandler(answer_callback, pattern='^q_'))
+    # Callback queries routers
+    application.add_handler(CallbackQueryHandler(subject_callback, pattern='^subj_'))
+    application.add_handler(CallbackQueryHandler(check_answer_callback, pattern='^ans_'))
     
-    # Message handlers for text and voice
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_handler(MessageHandler(filters.VOICE, handle_voice))
     
-    print("🚀 Mega Ultimate JEE/NEET Bot Online...")
+    print("🚀 Padaiwala Dost V2.0 Successfully Running...")
     application.run_polling()
 
 if __name__ == '__main__':
