@@ -16,7 +16,7 @@ user_histories = {}
 SYSTEM_PROMPT = """Tu ek expert JEE aur NEET AI tutor hai. Physics, Chemistry, Math, Biology mein expert hai. Step-by-step solution de, Hinglish mein baat kar, encouraging reh."""
 
 async def start(update, context):
-    await update.message.reply_text("Assalam-o-Alaikum! 👋\nMain aapka JEE/NEET AI Assistant hoon!\n✅ Physics, Chemistry, Math, Biology\n✅ 24/7 available\nApna doubt likhiye! 📚")
+    await update.message.reply_text("Hello Buddy! 👋\nMain aapka JEE/NEET AI Assistant hoon!\n✅ Physics, Chemistry, Math, Biology\n✅ 24/7 available\nApna doubt likhiye! 📚")
 
 async def clear(update, context):
     user_histories[update.effective_user.id] = []
