@@ -30,7 +30,8 @@ async def handle_message(update, context):
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     try:
         response = client.chat.completions.create(
-            model="llama3-70b-8192",
+            model="llama-3.3-70b-specdec"
+
             messages=[{"role": "system", "content": SYSTEM_PROMPT}] + user_histories[user_id],
             max_tokens=1024,
         )
