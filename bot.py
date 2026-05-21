@@ -20,7 +20,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
     try:
-        # Naya working model use kar rahe hain yahan
+        # 100% working live Groq model daal diya hai yahan
         chat_completion = groq_client.chat.completions.create(
             messages=[
                 {
@@ -28,7 +28,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "content": user_text,
                 }
             ],
-            model="llama-3.3-70b-specdec",
+            model="llama-3.1-8b-instant",
         )
         reply = chat_completion.choices[0].message.content
         await update.message.reply_text(reply)
