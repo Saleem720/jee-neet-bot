@@ -15,14 +15,18 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 groq_client = Groq(api_key=GROQ_API_KEY)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Hello! Main aapka JEE/NEET assistant hoon. Poochhiye apna sawaal!")
+    await update.message.reply_text("Hello! Main aapka JEE/NEET assistant hoon. Poochhiye apna sawaal! Main aapko Hinglish mein samjhaunga. 👍")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
     try:
-        # 100% working live Groq model daal diya hai yahan
+        # Chat completion jisme Hinglish ke liye system instruction add kiya hai
         chat_completion = groq_client.chat.completions.create(
             messages=[
+                {
+                    "role": "system",
+                    "content": "You are a helpful AI assistant for JEE/NEET students. Always reply in easy-to-understand Hinglish (mix of Hindi and English like conversational chat). Explain complex physics, chemistry, and biology concepts in simple terms using points, so that Indian students can understand easily."
+                },
                 {
                     "role": "user",
                     "content": user_text,
