@@ -73,16 +73,28 @@ def handle_query(call):
 def handle_student_voice(message):
     bot.reply_to(message, "⏳ Aapki voice note mil gayi hai! Tutorbhai AI isko short notes me badal raha hai...")
 
-    file_name = f"voice_{message.chat.id}.ogg"
+    file_name = None
     try:
-        # Telegram se audio download karne ka process
-        file_info = bot.get_file(message.voice.file_id if message.voice else message.audio.file_id)
+        # Pata lagao ki voice hai ya normal audio file aur sahi file_id uthao
+        if message.voice:
+            file_id = message.voice.file_id
+            # Safe side ke liye default extension fallback
+            file_name = f"voice_{message.chat.id}.ogg"
+        else:
+            file_id = message.audio.file_id
+            # Agar original file name hai toh uski extension use karo, nahi toh .mp3
+            orig_name = getattr(message.audio, 'file_name', '')
+            ext = os.path.splitext(orig_name)[1] if orig_name else '.mp3'
+            file_name = f"audio_{message.chat.id}{ext}"
+
+        # Telegram server se file download karna
+        file_info = bot.get_file(file_id)
         downloaded_file = bot.download_file(file_info.file_path)
         
         with open(file_name, 'wb') as new_file:
             new_file.write(downloaded_file)
 
-        # Groq Whisper se audio ko text me badlein
+        # Groq Whisper se audio transcription nikalna
         with open(file_name, "rb") as audio_file:
             transcription = groq_client.audio.transcriptions.create(
                 file=(file_name, audio_file.read()),
@@ -90,7 +102,11 @@ def handle_student_voice(message):
                 response_format="text"
             )
 
-        # AI se text ka summary banwayein
+        if not transcription or str(transcription).strip() == "":
+            bot.reply_to(message, "❌ Is audio me mujhe koi aawaz sunai nahi di. Kripya thoda saaf aur lamba audio bhejein.")
+            return
+
+        # AI se notes generate karwana
         completion = groq_client.chat.completions.create(
             model="llama3-8b-8192", 
             messages=[
@@ -100,23 +116,21 @@ def handle_student_voice(message):
                 },
                 {
                     "role": "user", 
-                    "content": transcription
+                    "content": str(transcription)
                 }
             ]
         )
 
         ai_notes = completion.choices[0].message.content
-
-        # Student ko reply dein
         bot.reply_to(message, f"📝 **Tutorbhai Short Notes:**\n\n{ai_notes}")
         
     except Exception as e:
         bot.reply_to(message, "❌ Maaf kijiyega, is audio ko process karne me thodi dikkat aayi. Kripya dobara koshish karein.")
-        print(f"Error occurred: {e}")
+        print(f"Detailed Error: {e}")
         
     finally:
-        # Audio file delete karein taaki server space full na ho
-        if os.path.exists(file_name):
+        # File remove karna clean-up ke liye
+        if file_name and os.path.exists(file_name):
             os.remove(file_name)
 
 
