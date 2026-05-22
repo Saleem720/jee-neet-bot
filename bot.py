@@ -2,6 +2,7 @@ import os
 import logging
 import json
 import base64
+import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
@@ -19,10 +20,11 @@ logging.basicConfig(
 # ─── CREDENTIALS ──────────────────────────────────────────────────────────────
 TOKEN          = os.getenv("TELEGRAM_BOT_TOKEN")
 GROQ_API_KEY   = os.getenv("GROQ_API_KEY")
-ANTHROPIC_KEY  = os.getenv("ANTHROPIC_API_KEY")   # NEW: Claude for image analysis
+ANTHROPIC_KEY  = os.getenv("ANTHROPIC_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-groq_client    = Groq(api_key=GROQ_API_KEY)
-claude_client  = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
+groq_client   = Groq(api_key=GROQ_API_KEY)
+claude_client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
 
 # ─── SYSTEM PROMPT ────────────────────────────────────────────────────────────
 SYSTEM_PROMPT = """Tu "Padaiwala Dost" hai — ek expert aur friendly JEE/NEET study mentor.
@@ -33,21 +35,20 @@ SYSTEM_PROMPT = """Tu "Padaiwala Dost" hai — ek expert aur friendly JEE/NEET s
 - Complex concepts ko simple analogies se samjhao
 
 ## Har response mein:
-1. Concept ka naam **bold** mein
+1. Concept ka naam bold mein
 2. Simple explanation (2-3 lines Hinglish)
-3. **Key Formula** (if applicable) — clearly formatted using backticks
-4. **Trick/Mnemonic** — easy yaad karne ke liye
+3. Key Formula (if applicable)
+4. Trick/Mnemonic — easy yaad karne ke liye
 5. Ek motivating line ya engaging follow-up question
 
 ## Rules:
 - Always Hinglish mein jawab do
-- Formulas ko `code format` mein likho taaki clearly dikhein
 - Kabhi galat info mat do — agar pata nahi toh bol do
 - Response concise rakho — max 300 words
+- Markdown formatting mat use karo
 """
 
 # ─── USER SESSION STORAGE ─────────────────────────────────────────────────────
-# { user_id: { exam, class_level, onboarded, history: [...] } }
 user_sessions: dict[int, dict] = {}
 
 def get_session(user_id: int) -> dict:
@@ -56,15 +57,14 @@ def get_session(user_id: int) -> dict:
             "exam":        None,
             "class_level": None,
             "onboarded":   False,
-            "history":     [],   # Groq message history
+            "history":     [],
+            "waiting_diagram": False,
         }
     return user_sessions[user_id]
 
-# ─── GROQ CHAT HELPER (with conversation memory) ──────────────────────────────
+# ─── GROQ CHAT HELPER ─────────────────────────────────────────────────────────
 def ask_groq(session: dict, user_text: str) -> str:
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-
-    # Add student context to very first user message
     history = session["history"]
     if not history:
         context_line = (
@@ -73,22 +73,59 @@ def ask_groq(session: dict, user_text: str) -> str:
         )
         user_text = context_line + user_text
 
-    messages += history[-10:]   # last 5 turns (10 messages) — token safe
+    messages += history[-10:]
     messages.append({"role": "user", "content": user_text})
 
     response = groq_client.chat.completions.create(
         messages=messages,
-        model="llama-3.3-70b-versatile",   # UPGRADED: much smarter model
+        model="llama-3.3-70b-versatile",
         temperature=0.6,
         max_tokens=700,
     )
     reply = response.choices[0].message.content
-
-    # Save to history
-    session["history"].append({"role": "user",      "content": user_text})
-    session["history"].append({"role": "assistant",  "content": reply})
-
+    session["history"].append({"role": "user",     "content": user_text})
+    session["history"].append({"role": "assistant", "content": reply})
     return reply
+
+# ─── GEMINI DIAGRAM GENERATOR ─────────────────────────────────────────────────
+def generate_diagram_gemini(topic: str) -> bytes | None:
+    """Gemini se SVG/text diagram banao aur image return karo."""
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key={GEMINI_API_KEY}"
+        
+        prompt = (
+            f"Create a clean, simple, labeled educational diagram of '{topic}' for JEE/NEET students.\n"
+            "Generate an SVG image with:\n"
+            "- White background\n"
+            "- Clear labels in English\n"
+            "- Simple shapes (circles, rectangles, arrows)\n"
+            "- All important parts labeled\n"
+            "- Title at top\n"
+            "Return ONLY the SVG code, nothing else. Start with <svg and end with </svg>"
+        )
+        
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": 0.1, "maxOutputTokens": 2000}
+        }
+        
+        resp = requests.post(url, json=payload, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        
+        svg_text = data["candidates"][0]["content"]["parts"][0]["text"]
+        
+        # SVG se clean karo
+        if "<svg" in svg_text:
+            start = svg_text.find("<svg")
+            end   = svg_text.rfind("</svg>") + 6
+            svg_text = svg_text[start:end]
+        
+        return svg_text.encode("utf-8")
+        
+    except Exception as e:
+        logging.error(f"Gemini diagram error: {e}")
+        return None
 
 # ─── CLAUDE IMAGE ANALYSIS ────────────────────────────────────────────────────
 def analyze_image_claude(image_bytes: bytes, caption: str = "") -> str:
@@ -103,7 +140,7 @@ def analyze_image_claude(image_bytes: bytes, caption: str = "") -> str:
             "role": "user",
             "content": [
                 {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": b64}},
-                {"type": "text",  "text": (
+                {"type": "text", "text": (
                     f"{prompt}\n\n"
                     "Yeh karo:\n"
                     "1. Diagram ka naam batao\n"
@@ -119,9 +156,9 @@ def analyze_image_claude(image_bytes: bytes, caption: str = "") -> str:
 # ─── KEYBOARDS ────────────────────────────────────────────────────────────────
 def exam_keyboard():
     return InlineKeyboardMarkup([[
-        InlineKeyboardButton("🏥 NEET",        callback_data="exam_NEET"),
-        InlineKeyboardButton("🔬 JEE",         callback_data="exam_JEE"),
-        InlineKeyboardButton("📚 Board Only",  callback_data="exam_Board"),
+        InlineKeyboardButton("🏥 NEET",       callback_data="exam_NEET"),
+        InlineKeyboardButton("🔬 JEE",        callback_data="exam_JEE"),
+        InlineKeyboardButton("📚 Board Only", callback_data="exam_Board"),
     ]])
 
 def class_keyboard():
@@ -134,16 +171,19 @@ def class_keyboard():
 def main_menu_keyboard():
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("⚛️ Physics",    callback_data="subj_physics"),
-            InlineKeyboardButton("🧪 Chemistry",  callback_data="subj_chemistry"),
+            InlineKeyboardButton("⚛️ Physics",   callback_data="subj_physics"),
+            InlineKeyboardButton("🧪 Chemistry", callback_data="subj_chemistry"),
         ],
         [
-            InlineKeyboardButton("🧬 Biology",    callback_data="subj_biology"),
-            InlineKeyboardButton("📐 Maths",      callback_data="subj_maths"),
+            InlineKeyboardButton("🧬 Biology",   callback_data="subj_biology"),
+            InlineKeyboardButton("📐 Maths",     callback_data="subj_maths"),
         ],
         [
-            InlineKeyboardButton("🎯 Quiz",       callback_data="quick_quiz"),
-            InlineKeyboardButton("📚 Notes",      callback_data="quick_notes"),
+            InlineKeyboardButton("🎯 Quiz",      callback_data="quick_quiz"),
+            InlineKeyboardButton("🖼️ Diagram",   callback_data="quick_diagram"),
+        ],
+        [
+            InlineKeyboardButton("📚 Notes",     callback_data="quick_notes"),
         ],
     ])
 
@@ -152,7 +192,7 @@ def quiz_subject_keyboard():
         [InlineKeyboardButton("🌌 Physics",   callback_data='subj_physics')],
         [InlineKeyboardButton("🧪 Chemistry", callback_data='subj_chemistry')],
         [InlineKeyboardButton("🧬 Biology",   callback_data='subj_biology')],
-        [InlineKeyboardButton("📐 Maths",     callback_data='subj_maths')],   # NEW
+        [InlineKeyboardButton("📐 Maths",     callback_data='subj_maths')],
     ])
 
 # ─── /start ───────────────────────────────────────────────────────────────────
@@ -163,16 +203,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     session["history"]   = []
 
     await update.message.reply_text(
-        f"👋 *Namaste {user.first_name} bhai/behen!*\n\n"
-        "Main hoon *Padaiwala Dost V2.0* — tera AI study partner! 🚀\n\n"
+        f"Namaste {user.first_name} bhai/behen! 👋\n\n"
+        "Main hoon Padaiwala Dost V2.0 — tera AI study partner! 🚀\n\n"
         "Pehle bata — kaunsi exam ki taiyari kar raha/rahi hai?",
-        parse_mode="Markdown",
         reply_markup=exam_keyboard(),
     )
 
 # ─── CALLBACK HANDLER ─────────────────────────────────────────────────────────
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
+    query   = update.callback_query
     await query.answer()
     user_id = query.from_user.id
     session = get_session(user_id)
@@ -182,8 +221,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("exam_"):
         session["exam"] = data.replace("exam_", "")
         await query.edit_message_text(
-            f"✅ *{session['exam']}* — great choice!\n\nAb bata, kaunsi class mein hai?",
-            
+            f"✅ {session['exam']} — great choice!\n\nAb bata, kaunsi class mein hai?",
             reply_markup=class_keyboard(),
         )
 
@@ -192,30 +230,35 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         session["class_level"] = data.replace("class_", "")
         session["onboarded"]   = True
         await query.edit_message_text(
-            f"🎯 *{session['exam']}* + *Class {session['class_level']}* — perfect!\n\n"
+            f"🎯 {session['exam']} + Class {session['class_level']} — perfect!\n\n"
             "Ab koi bhi topic type karo, ya neeche se choose karo 👇",
-            parse_mode="Markdown",
             reply_markup=main_menu_keyboard(),
         )
 
-    # Subject shortcut → ask topic
+    # Subject shortcut
     elif data.startswith("subj_") and not context.user_data.get("quiz_mode"):
         subject = data.replace("subj_", "").capitalize()
         await query.message.reply_text(
-            f"📚 *{subject}* — kaunsa topic? Type karo! (e.g., Newton's Laws, Organic Chemistry)",
-            parse_mode="Markdown",
+            f"📚 {subject} — kaunsa topic? Type karo!",
         )
 
-    # Quick quiz from main menu
+    # Quick quiz
     elif data == "quick_quiz":
+        context.user_data["quiz_mode"] = True
         await query.message.reply_text(
-            "🎯 *Live AI Quiz!* Subject chuno:",
-            parse_mode="Markdown",
+            "🎯 Live AI Quiz! Subject chuno:",
             reply_markup=quiz_subject_keyboard(),
         )
-        context.user_data["quiz_mode"] = True
 
-    # Subject selected for QUIZ
+    # Quick diagram
+    elif data == "quick_diagram":
+        session["waiting_diagram"] = True
+        await query.message.reply_text(
+            "🖼️ Kaunsa diagram chahiye? Topic type karo!\n\n"
+            "Examples: Mitochondria, Human Heart, Newton's Laws, Benzene Structure, Solar System"
+        )
+
+    # Subject for quiz
     elif data.startswith("subj_") and context.user_data.get("quiz_mode"):
         context.user_data["quiz_mode"] = False
         subject = data.split('_')[1]
@@ -228,12 +271,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         explanation = context.user_data.get('explanation', 'Explanation available nahi hai.')
 
         if user_ans == correct_ans:
-            result = f"🎉 *SAHI JAWAB!* ({user_ans}) Bilkul correct! 💥\n\n"
+            result = f"🎉 SAHI JAWAB! ({user_ans}) Bilkul correct! 💥\n\n"
         else:
-            result = f"❌ *Galat!* Sahi answer tha *{correct_ans}*.\n\n"
+            result = f"❌ Galat! Sahi answer tha {correct_ans}.\n\n"
 
-        result += f"💡 *Explanation:*\n{explanation}\n\n👉 Naya sawaal? /quiz"
-        await query.edit_message_text(result, parse_mode="Markdown")
+        result += f"💡 Explanation:\n{explanation}\n\n👉 Naya sawaal? /quiz"
+        await query.edit_message_text(result)
 
     # Quick notes
     elif data == "quick_notes":
@@ -242,8 +285,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ─── QUIZ GENERATOR ───────────────────────────────────────────────────────────
 async def _generate_quiz(query, context, subject: str):
     await query.edit_message_text(
-        f"🔄 *Groq AI se fresh {subject.capitalize()} question ban raha hai...* Ek second! ⏳",
-        parse_mode="Markdown",
+        f"🔄 Groq AI se fresh {subject.capitalize()} question ban raha hai... Ek second! ⏳"
     )
     try:
         prompt = (
@@ -260,12 +302,12 @@ async def _generate_quiz(query, context, subject: str):
         qd = json.loads(completion.choices[0].message.content)
 
         text = (
-            f"🎯 *JEE/NEET {subject.capitalize()} Challenge!*\n\n"
+            f"🎯 JEE/NEET {subject.capitalize()} Challenge!\n\n"
             f"❓ {qd['question']}\n\n"
-            f"🅰️ {qd['A']}\n"
-            f"🅱️ {qd['B']}\n"
-            f"🆃 {qd['C']}\n"
-            f"🅳 {qd['D']}\n"
+            f"A) {qd['A']}\n"
+            f"B) {qd['B']}\n"
+            f"C) {qd['C']}\n"
+            f"D) {qd['D']}\n"
         )
         context.user_data['correct']     = qd['correct_option'].strip().upper()
         context.user_data['explanation'] = qd['explanation']
@@ -274,7 +316,7 @@ async def _generate_quiz(query, context, subject: str):
             [InlineKeyboardButton("A", callback_data='ans_A'), InlineKeyboardButton("B", callback_data='ans_B')],
             [InlineKeyboardButton("C", callback_data='ans_C'), InlineKeyboardButton("D", callback_data='ans_D')],
         ])
-        await query.edit_message_text(text, reply_markup=keyboard, parse_mode="Markdown")
+        await query.edit_message_text(text, reply_markup=keyboard)
 
     except Exception as e:
         logging.error(f"Quiz error: {e}")
@@ -284,20 +326,64 @@ async def _generate_quiz(query, context, subject: str):
 async def quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["quiz_mode"] = True
     await update.message.reply_text(
-        "🎯 *Live AI Quiz!* Subject chuno:",
-        parse_mode="Markdown",
+        "🎯 Live AI Quiz! Subject chuno:",
         reply_markup=quiz_subject_keyboard(),
     )
+
+# ─── /diagram COMMAND ─────────────────────────────────────────────────────────
+async def diagram_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    session = get_session(user_id)
+    
+    # Check if topic given with command e.g. /diagram mitochondria
+    args = context.args
+    if args:
+        topic = " ".join(args)
+        await _send_diagram(update.message, topic)
+    else:
+        session["waiting_diagram"] = True
+        await update.message.reply_text(
+            "🖼️ Kaunsa diagram chahiye? Topic type karo!\n\n"
+            "Examples: Mitochondria, Human Heart, Benzene, Newton's Laws, Atom Structure"
+        )
+
+async def _send_diagram(message, topic: str):
+    await message.reply_text(f"🎨 {topic} ka diagram ban raha hai... thoda wait karo! ⏳")
+    
+    svg_bytes = generate_diagram_gemini(topic)
+    
+    if svg_bytes:
+        # SVG ko directly bhejo as document
+        from io import BytesIO
+        svg_file = BytesIO(svg_bytes)
+        svg_file.name = f"{topic.replace(' ', '_')}_diagram.svg"
+        
+        try:
+            await message.reply_document(
+                document=svg_file,
+                caption=f"📊 {topic.capitalize()} Diagram\n\nSave karke browser mein kholo ya image viewer mein dekho! 🎯",
+            )
+        except Exception:
+            # SVG nahi chala toh text diagram bhejo
+            await message.reply_text(
+                f"SVG diagram generate hua lekin send nahi ho pa raha.\n"
+                f"Topic: {topic}\n\n"
+                f"Kya aap /diagram {topic} dobara try karoge?"
+            )
+    else:
+        await message.reply_text(
+            f"❌ {topic} ka diagram abhi generate nahi ho pa raha.\n"
+            "Thodi der baad try karo ya koi aur topic maango!"
+        )
 
 # ─── /notes COMMAND ───────────────────────────────────────────────────────────
 async def _send_notes(message):
     await message.reply_text(
-        "📚 *JEE/NEET Revision Sheets:*\n\n"
-        "🔹 [Physics Formulas Cheat-Sheet](https://t.me/Exam_Preparation_Notes)\n"
-        "🔹 [Chemistry Organic Name Reactions](https://t.me/Exam_Preparation_Notes)\n"
-        "🔹 [Biology High-Yield Diagrams Guide](https://t.me/Exam_Preparation_Notes)\n\n"
-        "💡 *Tip: Bookmarks mein save karo quick revision ke liye!*",
-        parse_mode="Markdown",
+        "📚 JEE/NEET Revision Sheets:\n\n"
+        "🔹 Physics Formulas Cheat-Sheet: https://t.me/Exam_Preparation_Notes\n"
+        "🔹 Chemistry Organic Name Reactions: https://t.me/Exam_Preparation_Notes\n"
+        "🔹 Biology High-Yield Diagrams Guide: https://t.me/Exam_Preparation_Notes\n\n"
+        "Tip: Bookmarks mein save karo quick revision ke liye!",
         disable_web_page_preview=True,
     )
 
@@ -306,31 +392,44 @@ async def notes_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ─── TEXT HANDLER ─────────────────────────────────────────────────────────────
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id  = update.effective_user.id
-    session  = get_session(user_id)
+    user_id   = update.effective_user.id
+    session   = get_session(user_id)
     user_text = update.message.text
 
-    # Not onboarded yet
     if not session["onboarded"]:
-        await update.message.reply_text(
-            "Pehle /start karke apna setup complete karo! 😊"
-        )
+        await update.message.reply_text("Pehle /start karke apna setup complete karo! 😊")
+        return
+
+    # Diagram topic wait kar raha hai
+    if session.get("waiting_diagram"):
+        session["waiting_diagram"] = False
+        await _send_diagram(update.message, user_text)
         return
 
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+    # Diagram keywords detect karo
+    diagram_words = ["diagram", "dikhao", "photo", "image", "chitra", "structure", "draw"]
+    if any(w in user_text.lower() for w in diagram_words):
+        topic = user_text.lower()
+        for w in diagram_words + ["mujhe", "ka", "ki", "ke", "banao", "bana", "do"]:
+            topic = topic.replace(w, "")
+        topic = topic.strip()
+        if topic:
+            await _send_diagram(update.message, topic)
+            return
 
     try:
         reply = ask_groq(session, user_text)
         await update.message.reply_text(
             reply,
-            parse_mode="Markdown",
             reply_markup=main_menu_keyboard(),
         )
     except Exception as e:
         logging.error(f"Groq error: {e}")
         await update.message.reply_text("❌ Server busy hai, ek baar fir try karo!")
 
-# ─── IMAGE HANDLER (NEW — Claude powered) ────────────────────────────────────
+# ─── IMAGE HANDLER ────────────────────────────────────────────────────────────
 async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     session = get_session(user_id)
@@ -343,17 +442,13 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🖼️ Diagram dekh raha hoon... ek second! 🔍")
 
     try:
-        photo    = update.message.photo[-1]
-        file     = await context.bot.get_file(photo.file_id)
+        photo     = update.message.photo[-1]
+        file      = await context.bot.get_file(photo.file_id)
         img_bytes = await file.download_as_bytearray()
-        caption  = update.message.caption or ""
+        caption   = update.message.caption or ""
 
         reply = analyze_image_claude(bytes(img_bytes), caption)
-        await update.message.reply_text(
-            reply,
-            parse_mode="Markdown",
-            reply_markup=main_menu_keyboard(),
-        )
+        await update.message.reply_text(reply, reply_markup=main_menu_keyboard())
     except Exception as e:
         logging.error(f"Image error: {e}")
         await update.message.reply_text("❌ Image analyse nahi ho paayi. Dobara bhejo!")
@@ -361,41 +456,36 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ─── VOICE HANDLER ────────────────────────────────────────────────────────────
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🎤 Voice feature coming soon! Abhi ke liye question *type* karke bhejo dost. 👍",
-        parse_mode="Markdown",
+        "🎤 Voice feature coming soon! Abhi ke liye question type karke bhejo dost. 👍"
     )
 
 # ─── /menu COMMAND ────────────────────────────────────────────────────────────
 async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Kya padhna hai aaj? 👇",
-        reply_markup=main_menu_keyboard(),
-    )
+    await update.message.reply_text("Kya padhna hai aaj? 👇", reply_markup=main_menu_keyboard())
 
 # ─── /reset COMMAND ───────────────────────────────────────────────────────────
 async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_sessions.pop(update.effective_user.id, None)
-    await update.message.reply_text(
-        "🔁 Session reset! /start se naye sire se shuru karo."
-    )
+    await update.message.reply_text("🔁 Session reset! /start se naye sire se shuru karo.")
 
 # ─── /help COMMAND ────────────────────────────────────────────────────────────
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🤖 *Padaiwala Dost V2.0 — Help*\n\n"
+        "Padaiwala Dost V2.0 — Help\n\n"
         "Main kya kar sakta hoon:\n"
-        "• Koi bhi *Physics, Chemistry, Bio, Maths* topic explain karna\n"
-        "• *Diagram/Photo* bhejo → Claude AI se detailed explanation\n"
-        "• *Live AI Quiz* — fresh JEE/NEET MCQs\n"
-        "• *Conversation yaad rakhta hoon* — baar baar explain nahi karna\n\n"
+        "• Physics, Chemistry, Bio, Maths topic explain karna\n"
+        "• Diagram bhejo → Claude AI se explanation\n"
+        "• Bot khud diagram generate kare → /diagram topic\n"
+        "• Live AI Quiz — fresh JEE/NEET MCQs\n"
+        "• Conversation yaad rakhta hoon\n\n"
         "Commands:\n"
-        "/start — Setup shuru karo\n"
-        "/quiz  — Live AI quiz\n"
-        "/notes — Revision sheets\n"
-        "/menu  — Main menu\n"
-        "/reset — Session reset\n"
-        "/help  — Yeh message",
-        parse_mode="Markdown",
+        "/start    — Setup shuru karo\n"
+        "/quiz     — Live AI quiz\n"
+        "/diagram  — Diagram generate karo\n"
+        "/notes    — Revision sheets\n"
+        "/menu     — Main menu\n"
+        "/reset    — Session reset\n"
+        "/help     — Yeh message"
     )
 
 # ─── MAIN ─────────────────────────────────────────────────────────────────────
@@ -403,24 +493,20 @@ def main():
     if not TOKEN or not GROQ_API_KEY:
         logging.error("TELEGRAM_BOT_TOKEN ya GROQ_API_KEY missing!")
         return
-    if not ANTHROPIC_KEY:
-        logging.warning("ANTHROPIC_API_KEY missing — image analysis kaam nahi karega!")
 
     app = Application.builder().token(TOKEN).build()
 
-    app.add_handler(CommandHandler("start",  start))
-    app.add_handler(CommandHandler("quiz",   quiz_command))
-    app.add_handler(CommandHandler("notes",  notes_command))
-    app.add_handler(CommandHandler("menu",   menu_command))
-    app.add_handler(CommandHandler("reset",  reset_command))
-    app.add_handler(CommandHandler("help",   help_command))
+    app.add_handler(CommandHandler("start",   start))
+    app.add_handler(CommandHandler("quiz",    quiz_command))
+    app.add_handler(CommandHandler("diagram", diagram_command))
+    app.add_handler(CommandHandler("notes",   notes_command))
+    app.add_handler(CommandHandler("menu",    menu_command))
+    app.add_handler(CommandHandler("reset",   reset_command))
+    app.add_handler(CommandHandler("help",    help_command))
 
-    # Callback queries
     app.add_handler(CallbackQueryHandler(button_handler, pattern='^(exam_|class_|subj_|ans_|quick_)'))
-
-    # Message handlers
-    app.add_handler(MessageHandler(filters.PHOTO,              handle_image))
-    app.add_handler(MessageHandler(filters.VOICE,              handle_voice))
+    app.add_handler(MessageHandler(filters.PHOTO,                   handle_image))
+    app.add_handler(MessageHandler(filters.VOICE,                   handle_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     print("🚀 Padaiwala Dost V2.0 chal raha hai...")
