@@ -1,5 +1,4 @@
 import os
-import io
 import requests
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -76,46 +75,50 @@ def handle_student_voice(message):
     bot.reply_to(message, "⏳ Aapki voice note mil gayi hai! Tutorbhai AI isko short notes me badal raha hai...")
 
     try:
-        # 1. File ID extract karo aur content type check karo
+        # 1. File ID nikalo
         if message.voice:
             file_id = message.voice.file_id
-            # Groq API stream pipelines ke liye strict standard file name dena safe hota hai
-            filename = "sample.opus" 
+            filename = "voice.mp3"  # Force standard extension for Groq endpoint bypass
         else:
             file_id = message.audio.file_id
             orig_name = getattr(message.audio, 'file_name', '')
             ext = os.path.splitext(orig_name)[1].lower() if orig_name else '.mp3'
-            filename = f"sample{ext}"
+            filename = f"audio{ext}"
 
-        # 2. Telegram Server se direct direct byte data fetch karo
+        # 2. Telegram se file content download karo
         file_info = bot.get_file(file_id)
         file_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_info.file_path}"
         
-        response = requests.get(file_url)
+        audio_response = requests.get(file_url)
+        if audio_response.status_code != 200:
+            raise Exception("Telegram file download failed.")
+
+        # 3. Groq API ko direct requests ke multipart form se request bhejenge (Robust Method)
+        url = "https://api.groq.com/openai/v1/audio/transcriptions"
+        headers = {
+            "Authorization": f"Bearer {GROQ_API_KEY}"
+        }
+        files = {
+            "file": (filename, audio_response.content, "audio/mpeg")
+        }
+        data = {
+            "model": "whisper-large-v3",
+            "response_format": "json"
+        }
+
+        response = requests.post(url, headers=headers, files=files, data=data)
+        
         if response.status_code != 200:
-            raise Exception("Telegram content fetch failed.")
-            
-        audio_content = response.content
+            raise Exception(f"Groq API Error: {response.text}")
 
-        # 3. File object ko memory wrapper (io.BytesIO) me wrap karke standard stream model banana
-        audio_file_like = io.BytesIO(audio_content)
-        audio_file_like.name = filename  # Groq requirements ke liye meta-name inject karna compulsory hai
-
-        # 4. Groq Whisper transcription call
-        transcription_data = groq_client.audio.transcriptions.create(
-            file=audio_file_like,
-            model="whisper-large-v3",
-            response_format="json"
-        )
-
-        # Response extract karna
-        transcription_text = transcription_data.text if hasattr(transcription_data, 'text') else str(transcription_data)
+        transcription_json = response.json()
+        transcription_text = transcription_json.get("text", "")
 
         if not transcription_text or transcription_text.strip() == "":
             bot.reply_to(message, "❌ Is audio me mujhe koi clear aawaz sunai nahi di. Kripya thoda saaf aur lamba audio record karke bhejein.")
             return
 
-        # 5. Llama-3 AI se smart quality notes banana
+        # 4. Llama-3 AI se smart notes generate karwayein
         completion = groq_client.chat.completions.create(
             model="llama3-8b-8192", 
             messages=[
@@ -135,7 +138,7 @@ def handle_student_voice(message):
         
     except Exception as e:
         bot.reply_to(message, "❌ Maaf kijiyega, is audio ko process karne me thodi dikkat aayi. Kripya ek baar dobara koshish karein.")
-        print(f"Server Core Log: {e}")
+        print(f"Detailed Error: {e}")
 
 
 # ==========================================
