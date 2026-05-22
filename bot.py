@@ -7,7 +7,8 @@ from groq import Groq
 # ⚙️ COFIGURATION (RAILWAY VARIABLES SE)
 # ==========================================
 # Yeh automatic aapke Railway Config Vars se keys utha lega
-BOT_TOKEN = os.environ.get("BOT_TOKEN")  # Agar Railway me naam alag hai, toh wo naam yahan likhein
+BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+# Agar Railway me naam alag hai, toh wo naam yahan likhein
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
 # Initialize Bot and AI Client
