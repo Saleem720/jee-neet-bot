@@ -76,42 +76,46 @@ def handle_student_voice(message):
     bot.reply_to(message, "⏳ Aapki voice note mil gayi hai! Tutorbhai AI isko short notes me badal raha hai...")
 
     try:
-        # 1. Pata lagao voice hai ya audio file aur dynamic extension chuno
+        # 1. File ID extract karo aur content type check karo
         if message.voice:
             file_id = message.voice.file_id
-            filename = "voice.ogg"
+            # Groq API stream pipelines ke liye strict standard file name dena safe hota hai
+            filename = "sample.opus" 
         else:
             file_id = message.audio.file_id
             orig_name = getattr(message.audio, 'file_name', '')
             ext = os.path.splitext(orig_name)[1].lower() if orig_name else '.mp3'
-            filename = f"audio{ext}"
+            filename = f"sample{ext}"
 
-        # 2. Telegram API se file link fetch karna
+        # 2. Telegram Server se direct direct byte data fetch karo
         file_info = bot.get_file(file_id)
         file_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_info.file_path}"
         
-        # 3. Direct memory stream me file bytes download karna (Bina storage use kiye)
         response = requests.get(file_url)
         if response.status_code != 200:
-            raise Exception("Telegram se content pull nahi ho saka.")
+            raise Exception("Telegram content fetch failed.")
             
-        audio_bytes = response.content
+        audio_content = response.content
 
-        # 4. Groq Whisper API Call using Named Tuple Stream (Cleanest Way)
+        # 3. File object ko memory wrapper (io.BytesIO) me wrap karke standard stream model banana
+        audio_file_like = io.BytesIO(audio_content)
+        audio_file_like.name = filename  # Groq requirements ke liye meta-name inject karna compulsory hai
+
+        # 4. Groq Whisper transcription call
         transcription_data = groq_client.audio.transcriptions.create(
-            file=(filename, audio_bytes),
+            file=audio_file_like,
             model="whisper-large-v3",
-            response_format="json"  # Text se badal kar JSON format kiya taaki safe mapping ho
+            response_format="json"
         )
 
-        # JSON response se text nikalna
+        # Response extract karna
         transcription_text = transcription_data.text if hasattr(transcription_data, 'text') else str(transcription_data)
 
         if not transcription_text or transcription_text.strip() == "":
             bot.reply_to(message, "❌ Is audio me mujhe koi clear aawaz sunai nahi di. Kripya thoda saaf aur lamba audio record karke bhejein.")
             return
 
-        # 5. Llama-3 AI se dhasu summary notes generate karwana
+        # 5. Llama-3 AI se smart quality notes banana
         completion = groq_client.chat.completions.create(
             model="llama3-8b-8192", 
             messages=[
@@ -131,7 +135,7 @@ def handle_student_voice(message):
         
     except Exception as e:
         bot.reply_to(message, "❌ Maaf kijiyega, is audio ko process karne me thodi dikkat aayi. Kripya ek baar dobara koshish karein.")
-        print(f"Server Processing Error Log: {e}")
+        print(f"Server Core Log: {e}")
 
 
 # ==========================================
