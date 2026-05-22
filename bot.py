@@ -9,7 +9,7 @@ BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # ==========================================
-# 🚀 WELCOME MESSAGE & MAIN INTERFACE ONLY
+# 🚀 WELCOME INTERFACE WITH MENUS ONLY
 # ==========================================
 @bot.message_handler(commands=['start'])
 def welcome(message):
@@ -30,37 +30,47 @@ def welcome(message):
     
     welcome_text = (
         "🎓 **Welcome to Tutorbhai Bot!**\n\n"
-        "Main aapki padhai asaan banane ke liye tayaar hoon. Niche diye gaye buttons use karein!"
+        "Main aapki padhai ko asaan banane ke liye tayaar hoon. Study material aur modules ke liye neeche diye gaye buttons ka upyog karein!"
     )
     
     bot.send_message(message.chat.id, welcome_text, reply_markup=markup, parse_mode='Markdown')
 
 
 # ==========================================
-# 🎛️ BUTTONS CLICK HANDLER (ONLY FIXED REPLIES)
+# 🎛️ BUTTONS CLICK HANDLER (ONLY FIXED TEXT REPLIES)
 # ==========================================
 @bot.callback_query_handler(func=lambda call: True)
 def handle_query(call):
     if call.data == 'notes_feature':
         bot.send_message(
             call.message.chat.id, 
-            "📚 **Tutorbhai Notes:**\nApne topic ka naam text mein likh kar bhejiye, main aapko important notes de dunga!",
+            "📚 **Tutorbhai Notes:**\nSyllabus ke anusar important chapters aur notes jald hi yahan upload kiye jayenge. Jude rahein!",
             parse_mode='Markdown'
         )
     elif call.data.startswith('subject_'):
         subject_name = call.data.split('_')[1].capitalize()
-        bot.send_message(call.message.chat.id, f"Beta, ab tum **{subject_name}** ka agla sawaal try karo! 📖", parse_mode='Markdown')
+        bot.send_message(
+            call.message.chat.id, 
+            f"📖 **{subject_name} Module:**\nIs subject ke standard questions aur reference material jald hi chalu honge.", 
+            parse_mode='Markdown'
+        )
     elif call.data == 'feature_quiz':
-        bot.send_message(call.message.chat.id, "🎯 **Quiz Mode Chalu!** Main tumse jald hi sawaal poochunga.")
+        bot.send_message(
+            call.message.chat.id, 
+            "🎯 **Quiz Mode:**\nMock tests aur quick daily quizzes ka feature jald hi chalu kiya jayega!"
+        )
     elif call.data == 'feature_diagram':
-        bot.send_message(call.message.chat.id, "🖼️ **Diagram Mode:** Mujhe koi bhi educational diagram ya map ki photo bhejo!")
+        bot.send_message(
+            call.message.chat.id, 
+            "🖼️ **Diagram Mode:**\nImportant educational diagrams aur charts ka access aapko jald hi is button par milega."
+        )
     
     bot.answer_callback_query(call.id)
 
 
 # ==========================================
-# 🏁 BOT START POLLING (NO PHOTO/TEXT HANDLERS)
+# 🏁 BOT START POLLING (ALL PHOTO/TEXT EXTRA HANDLERS DETACHED)
 # ==========================================
 if __name__ == '__main__':
-    print("Tutorbhai Bot is running with ONLY button interfaces...")
+    print("Tutorbhai Engine successfully running on pure button interface mode...")
     bot.polling(none_stop=True, timeout=60)
