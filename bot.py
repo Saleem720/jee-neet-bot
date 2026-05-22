@@ -1,5 +1,4 @@
 import os
-import io
 import requests
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -40,7 +39,7 @@ def welcome(message):
         "🎓 **Welcome to Tutorbhai Bot!**\n\n"
         "Main aapki padhai asaan banane ke liye tayaar hoon. Niche diye gaye buttons use karein ya:\n"
         "📸 **Photo Bhejo:** Kisi bhi diagram ya sawaal ka solution paane ke liye.\n"
-        "🎙️ **Voice/Audio Bhejo:** Apne lecture ko 5-second me short notes me badalne ke liye!"
+        "🎙️ **Voice/Audio Bhejo:** Apne lecture ko short notes me badalne ke liye!"
     )
     
     bot.send_message(message.chat.id, welcome_text, reply_markup=markup, parse_mode='Markdown')
@@ -75,46 +74,54 @@ def handle_query(call):
 def handle_student_voice(message):
     bot.reply_to(message, "⏳ Aapki voice note mil gayi hai! Tutorbhai AI isko short notes me badal raha hai...")
 
+    # Safe Temporary Path set karna Linux system ke liye
+    temp_dir = "/tmp"
+    if not os.path.exists(temp_dir):
+        temp_dir = "." # Fallback agar directory na mile
+        
+    file_path_local = None
+
     try:
-        # 1. File ID aur valid dynamic extension check karo
+        # 1. Check karo dynamic files extensions aur dynamic path set karo
         if message.voice:
             file_id = message.voice.file_id
-            virtual_filename = "voice.ogg"
-            mime_type = "audio/ogg"
+            file_path_local = os.path.join(temp_dir, f"voice_{message.chat.id}.ogg")
         else:
             file_id = message.audio.file_id
             orig_name = getattr(message.audio, 'file_name', '')
             ext = os.path.splitext(orig_name)[1].lower() if orig_name else '.mp3'
-            virtual_filename = f"audio{ext}"
-            mime_type = "audio/mpeg" if ext == '.mp3' else "audio/ogg"
+            file_path_local = os.path.join(temp_dir, f"audio_{message.chat.id}{ext}")
 
-        # 2. Telegram se file URL nikal kar proper requests stream se content download karo
+        # 2. Telegram API se file link fetch karna
         file_info = bot.get_file(file_id)
         file_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_info.file_path}"
-        response = requests.get(file_url)
         
-        if response.status_code != 200:
-            raise Exception("Telegram se file download nahi ho payi.")
+        # 3. Stream download karke temporarily server par save karna
+        response = requests.get(file_url, stream=True)
+        if response.status_code == 200:
+            with open(file_path_local, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=1024):
+                    if chunk:
+                        f.write(chunk)
+        else:
+            raise Exception("Telegram server se audio download nahi ho saka.")
 
-        # 3. Proper named tuple raw bytes package banao Groq ke liye
-        audio_bytes = response.content
-        file_payload = (virtual_filename, audio_bytes, mime_type)
-
-        # 4. Groq Whisper API Call
-        transcription = groq_client.audio.transcriptions.create(
-            file=file_payload,
-            model="whisper-large-v3",
-            response_format="text"
-        )
+        # 4. Groq Whisper API Call (Real physical file handling format se)
+        with open(file_path_local, "rb") as audio_file:
+            transcription = groq_client.audio.transcriptions.create(
+                file=audio_file,
+                model="whisper-large-v3",
+                response_format="text"
+            )
 
         # Validation check
         if not transcription or str(transcription).strip() == "":
             bot.reply_to(message, "❌ Is audio me mujhe koi clear aawaz sunai nahi di. Kripya thoda saaf aur lamba audio record karke bhejein.")
             return
 
-        # 5. Llama-3 70B AI se premium quality notes generate karwayein
+        # 5. Llama-3 AI se smart quality notes banana
         completion = groq_client.chat.completions.create(
-            model="llama3-70b-8192", 
+            model="llama3-8b-8192", 
             messages=[
                 {
                     "role": "system", 
@@ -132,7 +139,15 @@ def handle_student_voice(message):
         
     except Exception as e:
         bot.reply_to(message, "❌ Maaf kijiyega, is audio ko process karne me thodi dikkat aayi. Kripya ek baar dobara koshish karein.")
-        print(f"Detailed Server Error Log: {e}")
+        print(f"Server Processing Error Log: {e}")
+        
+    finally:
+        # Cleanup: Temp file ko delete karna taaki storage safe rahe
+        if file_path_local and os.path.exists(file_path_local):
+            try:
+                os.remove(file_path_local)
+            except Exception:
+                pass
 
 
 # ==========================================
