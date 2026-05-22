@@ -29,7 +29,7 @@ def welcome(message):
     markup.row(btn_notes)
     
     welcome_text = (
-        "🎓 **Welcome to Tutorbhai Bot!**\n\n"
+        "🎓 **Welcome to Hire Orbit Bot!**\n\n"
         "Main aapki padhai ko asaan banane ke liye tayaar hoon. Study material aur modules ke liye neeche diye gaye buttons ka upyog karein!"
     )
     
@@ -44,7 +44,7 @@ def handle_query(call):
     if call.data == 'notes_feature':
         bot.send_message(
             call.message.chat.id, 
-            "📚 **Tutorbhai Notes:**\nSyllabus ke anusar important chapters aur notes jald hi yahan upload kiye jayenge. Jude rahein!",
+            "📚 **Hire Orbit Notes:**\nSyllabus ke anusar important chapters aur notes jald hi yahan upload kiye jayenge. Jude rahein!",
             parse_mode='Markdown'
         )
     elif call.data.startswith('subject_'):
@@ -69,8 +69,8 @@ def handle_query(call):
 
 
 # ==========================================
-# 🏁 BOT START POLLING (ALL PHOTO/TEXT EXTRA HANDLERS DETACHED)
+# 🏁 BOT START POLLING (ALL EXTRA HANDLERS REMOVED)
 # ==========================================
 if __name__ == '__main__':
-    print("Tutorbhai Engine successfully running on pure button interface mode...")
+    print("Hire Orbit Engine successfully running on pure button interface mode...")
     bot.polling(none_stop=True, timeout=60)
