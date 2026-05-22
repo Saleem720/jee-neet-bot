@@ -1,20 +1,18 @@
 import os
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from groq import Groq
 
-# ==========================================
-# ⚙️ CONFIGURATION (DIRECT RAILWAY MATCH)
-# ==========================================
+# Configuration
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-bot = telebot.TeleBot(BOT_TOKEN)
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
-# ==========================================
-# 🚀 WELCOME INTERFACE WITH MENUS ONLY
-# ==========================================
+bot = telebot.TeleBot(BOT_TOKEN)
+groq_client = Groq(api_key=GROQ_API_KEY)
+
 @bot.message_handler(commands=['start'])
 def welcome(message):
     markup = InlineKeyboardMarkup(row_width=2)
-    
     btn_physics = InlineKeyboardButton("⚛️ Physics", callback_data="subject_physics")
     btn_chemistry = InlineKeyboardButton("🧪 Chemistry", callback_data="subject_chemistry")
     btn_biology = InlineKeyboardButton("🧬 Biology", callback_data="subject_biology")
@@ -22,55 +20,29 @@ def welcome(message):
     btn_quiz = InlineKeyboardButton("🎯 Quiz", callback_data="feature_quiz")
     btn_diagram = InlineKeyboardButton("🖼️ Diagram", callback_data="feature_diagram")
     btn_notes = InlineKeyboardButton("📚 Notes", callback_data="notes_feature")
-    
-    markup.add(btn_physics, btn_chemistry)
-    markup.add(btn_biology, btn_maths)
-    markup.add(btn_quiz, btn_diagram)
+    markup.add(btn_physics, btn_chemistry, btn_biology, btn_maths, btn_quiz, btn_diagram)
     markup.row(btn_notes)
     
-    welcome_text = (
-        "🎓 **Welcome to Hire Orbit Bot!**\n\n"
-        "Main aapki padhai ko asaan banane ke liye tayaar hoon. Study material aur modules ke liye neeche diye gaye buttons ka upyog karein!"
-    )
-    
-    bot.send_message(message.chat.id, welcome_text, reply_markup=markup, parse_mode='Markdown')
+    bot.send_message(message.chat.id, "🎓 **Welcome to Hire Orbit Bot!**\n\nKuch bhi poochiye, main aapki padhai mein madad karunga!", reply_markup=markup, parse_mode='Markdown')
 
-
-# ==========================================
-# 🎛️ BUTTONS CLICK HANDLER (ONLY FIXED TEXT REPLIES)
-# ==========================================
 @bot.callback_query_handler(func=lambda call: True)
 def handle_query(call):
-    if call.data == 'notes_feature':
-        bot.send_message(
-            call.message.chat.id, 
-            "📚 **Hire Orbit Notes:**\nSyllabus ke anusar important chapters aur notes jald hi yahan upload kiye jayenge. Jude rahein!",
-            parse_mode='Markdown'
-        )
-    elif call.data.startswith('subject_'):
-        subject_name = call.data.split('_')[1].capitalize()
-        bot.send_message(
-            call.message.chat.id, 
-            f"📖 **{subject_name} Module:**\nIs subject ke standard questions aur reference material jald hi chalu honge.", 
-            parse_mode='Markdown'
-        )
-    elif call.data == 'feature_quiz':
-        bot.send_message(
-            call.message.chat.id, 
-            "🎯 **Quiz Mode:**\nMock tests aur quick daily quizzes ka feature jald hi chalu kiya jayega!"
-        )
-    elif call.data == 'feature_diagram':
-        bot.send_message(
-            call.message.chat.id, 
-            "🖼️ **Diagram Mode:**\nImportant educational diagrams aur charts ka access aapko jald hi is button par milega."
-        )
-    
+    if call.data.startswith('subject_'):
+        bot.send_message(call.message.chat.id, f"📖 **{call.data.split('_')[1].capitalize()} Module:**\nMain is topic par research kar raha hoon, aap apna sawaal likh kar bhejiye!")
     bot.answer_callback_query(call.id)
 
+@bot.message_handler(func=lambda message: True)
+def handle_text(message):
+    # Llama-3 AI Engine for text answers
+    try:
+        completion = groq_client.chat.completions.create(
+            model="llama3-8b-8192",
+            messages=[{"role": "system", "content": "Aap ek expert tutor hain. Chote aur saaf jawab dein."},
+                      {"role": "user", "content": message.text}]
+        )
+        bot.reply_to(message, completion.choices[0].message.content)
+    except Exception as e:
+        bot.reply_to(message, "Abhi server busy hai, thodi der mein try karein.")
 
-# ==========================================
-# 🏁 BOT START POLLING (ALL EXTRA HANDLERS REMOVED)
-# ==========================================
 if __name__ == '__main__':
-    print("Hire Orbit Engine successfully running on pure button interface mode...")
-    bot.polling(none_stop=True, timeout=60)
+    bot.polling(none_stop=True)
