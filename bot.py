@@ -183,7 +183,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         session["exam"] = data.replace("exam_", "")
         await query.edit_message_text(
             f"✅ *{session['exam']}* — great choice!\n\nAb bata, kaunsi class mein hai?",
-            parse_mode="Markdown",
+            
             reply_markup=class_keyboard(),
         )
 
