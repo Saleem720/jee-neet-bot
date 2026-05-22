@@ -1,5 +1,6 @@
 python-telegram-bot
 groq
 anthropic
+requests
 
 
