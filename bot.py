@@ -1,4 +1,5 @@
 import os
+import io
 import requests
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -74,52 +75,43 @@ def handle_query(call):
 def handle_student_voice(message):
     bot.reply_to(message, "⏳ Aapki voice note mil gayi hai! Tutorbhai AI isko short notes me badal raha hai...")
 
-    # Safe Temporary Path set karna Linux system ke liye
-    temp_dir = "/tmp"
-    if not os.path.exists(temp_dir):
-        temp_dir = "." # Fallback agar directory na mile
-        
-    file_path_local = None
-
     try:
-        # 1. Check karo dynamic files extensions aur dynamic path set karo
+        # 1. Pata lagao voice hai ya audio file aur dynamic extension chuno
         if message.voice:
             file_id = message.voice.file_id
-            file_path_local = os.path.join(temp_dir, f"voice_{message.chat.id}.ogg")
+            filename = "voice.ogg"
         else:
             file_id = message.audio.file_id
             orig_name = getattr(message.audio, 'file_name', '')
             ext = os.path.splitext(orig_name)[1].lower() if orig_name else '.mp3'
-            file_path_local = os.path.join(temp_dir, f"audio_{message.chat.id}{ext}")
+            filename = f"audio{ext}"
 
         # 2. Telegram API se file link fetch karna
         file_info = bot.get_file(file_id)
         file_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_info.file_path}"
         
-        # 3. Stream download karke temporarily server par save karna
-        response = requests.get(file_url, stream=True)
-        if response.status_code == 200:
-            with open(file_path_local, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=1024):
-                    if chunk:
-                        f.write(chunk)
-        else:
-            raise Exception("Telegram server se audio download nahi ho saka.")
+        # 3. Direct memory stream me file bytes download karna (Bina storage use kiye)
+        response = requests.get(file_url)
+        if response.status_code != 200:
+            raise Exception("Telegram se content pull nahi ho saka.")
+            
+        audio_bytes = response.content
 
-        # 4. Groq Whisper API Call (Real physical file handling format se)
-        with open(file_path_local, "rb") as audio_file:
-            transcription = groq_client.audio.transcriptions.create(
-                file=audio_file,
-                model="whisper-large-v3",
-                response_format="text"
-            )
+        # 4. Groq Whisper API Call using Named Tuple Stream (Cleanest Way)
+        transcription_data = groq_client.audio.transcriptions.create(
+            file=(filename, audio_bytes),
+            model="whisper-large-v3",
+            response_format="json"  # Text se badal kar JSON format kiya taaki safe mapping ho
+        )
 
-        # Validation check
-        if not transcription or str(transcription).strip() == "":
+        # JSON response se text nikalna
+        transcription_text = transcription_data.text if hasattr(transcription_data, 'text') else str(transcription_data)
+
+        if not transcription_text or transcription_text.strip() == "":
             bot.reply_to(message, "❌ Is audio me mujhe koi clear aawaz sunai nahi di. Kripya thoda saaf aur lamba audio record karke bhejein.")
             return
 
-        # 5. Llama-3 AI se smart quality notes banana
+        # 5. Llama-3 AI se dhasu summary notes generate karwana
         completion = groq_client.chat.completions.create(
             model="llama3-8b-8192", 
             messages=[
@@ -129,7 +121,7 @@ def handle_student_voice(message):
                 },
                 {
                     "role": "user", 
-                    "content": str(transcription)
+                    "content": transcription_text
                 }
             ]
         )
@@ -140,14 +132,6 @@ def handle_student_voice(message):
     except Exception as e:
         bot.reply_to(message, "❌ Maaf kijiyega, is audio ko process karne me thodi dikkat aayi. Kripya ek baar dobara koshish karein.")
         print(f"Server Processing Error Log: {e}")
-        
-    finally:
-        # Cleanup: Temp file ko delete karna taaki storage safe rahe
-        if file_path_local and os.path.exists(file_path_local):
-            try:
-                os.remove(file_path_local)
-            except Exception:
-                pass
 
 
 # ==========================================
