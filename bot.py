@@ -33,16 +33,23 @@ def handle_audio(message):
         with open(file_name, 'wb') as f:
             f.write(downloaded_file)
             
-        # Groq Whisper API Translation call
+        # Groq Whisper API Translation call with explicit JSON handling
         with open(file_name, "rb") as audio_file:
             transcription = groq_client.audio.transcriptions.create(
                 file=audio_file,
-                model="whisper-large-v3"
+                model="whisper-large-v3",
+                response_format="json"
             )
             
-        text_content = transcription.text
+        # Safe extraction for both object property and dictionary lookups
+        if hasattr(transcription, 'text'):
+            text_content = transcription.text
+        elif isinstance(transcription, dict):
+            text_content = transcription.get("text", "")
+        else:
+            text_content = str(transcription)
         
-        if not text_content.strip():
+        if not text_content or not text_content.strip():
             bot.reply_to(message, "❌ Audio mein kuch sunai nahi diya.")
             return
             
@@ -67,5 +74,4 @@ def handle_audio(message):
 
 if __name__ == '__main__':
     print("Bot starting fresh...")
-    # none_stop=True ke sath purane conflicts clear karne ke liye timeout lagaya hai
     bot.polling(none_stop=True, timeout=60)
