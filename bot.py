@@ -4,11 +4,9 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from groq import Groq
 
 # ==========================================
-# ⚙️ COFIGURATION (RAILWAY VARIABLES SE)
+# ⚙️ CONFIGURATION (DIRECT RAILWAY MATCH)
 # ==========================================
-# Yeh automatic aapke Railway Config Vars se keys utha lega
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-# Agar Railway me naam alag hai, toh wo naam yahan likhein
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
 # Initialize Bot and AI Client
@@ -77,12 +75,14 @@ def handle_student_voice(message):
 
     file_name = f"voice_{message.chat.id}.ogg"
     try:
+        # Telegram se audio download karne ka process
         file_info = bot.get_file(message.voice.file_id if message.voice else message.audio.file_id)
         downloaded_file = bot.download_file(file_info.file_path)
         
         with open(file_name, 'wb') as new_file:
             new_file.write(downloaded_file)
 
+        # Groq Whisper se audio ko text me badlein
         with open(file_name, "rb") as audio_file:
             transcription = groq_client.audio.transcriptions.create(
                 file=(file_name, audio_file.read()),
@@ -90,6 +90,7 @@ def handle_student_voice(message):
                 response_format="text"
             )
 
+        # AI se text ka summary banwayein
         completion = groq_client.chat.completions.create(
             model="llama3-8b-8192", 
             messages=[
@@ -105,13 +106,16 @@ def handle_student_voice(message):
         )
 
         ai_notes = completion.choices[0].message.content
+
+        # Student ko reply dein
         bot.reply_to(message, f"📝 **Tutorbhai Short Notes:**\n\n{ai_notes}")
         
     except Exception as e:
         bot.reply_to(message, "❌ Maaf kijiyega, is audio ko process karne me thodi dikkat aayi. Kripya dobara koshish karein.")
-        print(f"Error: {e}")
+        print(f"Error occurred: {e}")
         
     finally:
+        # Audio file delete karein taaki server space full na ho
         if os.path.exists(file_name):
             os.remove(file_name)
 
