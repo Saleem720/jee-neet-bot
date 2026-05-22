@@ -1,4 +1,6 @@
 pyTelegramBotAPI
 groq
+requests
+
 
 
