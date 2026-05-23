@@ -1,18 +1,16 @@
 import os
-import google.generativeai as genai
 from groq import Groq
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 # --- API KEYS SETUP ---
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-# AI Engines Configuration
-genai.configure(api_key=GEMINI_API_KEY)
+# Groq Client configure karna (Multimodal aur Text dono isi se chalenge)
 groq_client = Groq(api_key=GROQ_API_KEY)
 
+# Sytem Prompt for Expert JEE/NEET Tutor Persona
 system_instruction = """
 Aap ek top-tier expert JEE aur NEET tutor hain. Aapka kaam students ke doubts solve karna hai.
 Rules:
@@ -23,10 +21,13 @@ Rules:
 5. Agar koi question mushkil hai, toh use aasan parts mein break karein.
 """
 
-gemini_model = genai.GenerativeModel(
-    model_name="gemini-1.5-flash",
-    system_instruction=system_instruction
-)
+# Universal function used to generate completion via Groq
+def get_groq_completion(messages):
+    chat_completion = groq_client.chat.completions.create(
+        messages=messages,
+        model="llama-3.2-11b-vision-preview", # Uses multimodal model for both text and vision
+    )
+    return chat_completion.choices[0].message.content
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_msg = (
@@ -38,58 +39,72 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(welcome_msg)
 
 async def handle_text_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Text doubts handler via Groq Llama"""
     user_question = update.message.text
     processing_msg = await update.message.reply_text("🤔 Question analyze kar raha hoon... thoda wait karein ⏳")
-    try:
-        response = gemini_model.generate_content(user_question)
-        await processing_msg.edit_text(response.text)
-    except Exception as e:
-        print(f"Gemini Text Error: {e}")
-        await processing_msg.edit_text("Oops! Kuch technical issue aa gaya 😥. Thodi der baad try karein.")
-
-async def handle_photo_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    processing_msg = await update.message.reply_text("📸 Photo mil gayi! Scanner active kar raha hoon... ⚙️")
     
     try:
-        # 1. Highest resolution photo object fetch karna
-        photo_file = await update.message.photo[-1].get_file()
+        # Build prompt for Groq Text request
+        messages = [
+            {
+                "role": "system",
+                "content": system_instruction
+            },
+            {
+                "role": "user",
+                "content": user_question
+            }
+        ]
         
-        # 2. Telegram API se strict URL structure taiyar karna
-        # Agar file_path complete URL nahi hai, toh use standard link mein convert karna
-        if photo_file.file_path and photo_file.file_path.startswith("http"):
-            image_url = photo_file.file_path
-        else:
-            image_url = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{photo_file.file_path}"
-        
-        # 3. Groq Llama-3.2-Vision Engine ko image URL pass karna
-        chat_completion = groq_client.chat.completions.create(
-            messages=[
-                {
-                    "role": "system",
-                    "content": system_instruction
-                },
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": "Is image mein diye gaye JEE/NEET ke question ko dekho, solve karo aur step-by-step fully explain karo."},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": image_url,
-                            },
-                        },
-                    ],
-                }
-            ],
-            model="llama-3.2-11b-vision-preview",
-        )
-        
-        solution_text = chat_completion.choices[0].message.content
+        # Groq Llama-3.2-Vision (Stable free tier model)
+        solution_text = get_groq_completion(messages)
         await processing_msg.edit_text(solution_text)
         
     except Exception as e:
-        print(f"Vision Full Error Log: {e}")
-        await processing_msg.edit_text("Mujhe is image ko process karne mein abhi thodi dikkat ho rahi hai 😔. Ek baar text mein pooch kar dekhiye!")
+        print(f"Groq Text Error Log: {e}")
+        await processing_msg.edit_text("Oops! Groq Llama engine mein temporary technical issue aa gaya 😥. Please thodi der baad try karein.")
+
+async def handle_photo_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Photo doubts handler via Groq Llama-3.2-Vision (Direct URL - Most Stable)"""
+    processing_msg = await update.message.reply_text("📸 Photo mil gayi! Llama Vision scanner active kar raha hoon... ⚙️")
+    
+    try:
+        # 1. Telegram se highest resolution image का data nikalna
+        photo_file = await update.message.photo[-1].get_file()
+        
+        # 2. Telegram API se direct image URL banana
+        if not photo_file.file_path.startswith("http"):
+            image_url = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{photo_file.file_path}"
+        else:
+            image_url = photo_file.file_path
+
+        # 3. Groq Multimodal prompt taiyar karna with direct URL
+        messages = [
+            {
+                "role": "system",
+                "content": system_instruction
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Is image mein diye gaye JEE/NEET ke question ko dekho, solve karo aur step-by-step fully explain karo."},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": image_url,
+                        },
+                    },
+                ],
+            }
+        ]
+        
+        # 4. Multimodal completion call
+        solution_text = get_groq_completion(messages)
+        await processing_msg.edit_text(solution_text)
+        
+    except Exception as e:
+        print(f"Groq Vision Full Error Log: {e}")
+        await processing_msg.edit_text("Mujhe is image ko process karne mein abhi thodi dikkat ho rahi hai 😔. Please ek baar text mein pooch kar dekhiye!")
 
 def main():
     if not TELEGRAM_BOT_TOKEN:
@@ -102,7 +117,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_question))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo_question))
 
-    print("Hybrid URL-based Bot is starting on Railway... 🚀")
+    print("Groq-only stable bot is starting on Railway... 🚀")
     app.run_polling()
 
 if __name__ == "__main__":
