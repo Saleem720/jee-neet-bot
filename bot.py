@@ -9,11 +9,10 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-# Both AI Engines configure karna
+# AI Engines Configuration
 genai.configure(api_key=GEMINI_API_KEY)
 groq_client = Groq(api_key=GROQ_API_KEY)
 
-# Sytem Prompt for Expert JEE/NEET Tutor Persona
 system_instruction = """
 Aap ek top-tier expert JEE aur NEET tutor hain. Aapka kaam students ke doubts solve karna hai.
 Rules:
@@ -39,7 +38,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(welcome_msg)
 
 async def handle_text_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Text doubts handler via Gemini"""
     user_question = update.message.text
     processing_msg = await update.message.reply_text("🤔 Question analyze kar raha hoon... thoda wait karein ⏳")
     try:
@@ -50,18 +48,20 @@ async def handle_text_question(update: Update, context: ContextTypes.DEFAULT_TYP
         await processing_msg.edit_text("Oops! Kuch technical issue aa gaya 😥. Thodi der baad try karein.")
 
 async def handle_photo_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Photo doubts handler via Groq Llama-3.2-Vision (Super Fast & Stable)"""
-    processing_msg = await update.message.reply_text("📸 Photo mil gayi! Llama Vision engine se scan aur solve kar raha hoon... ⚙️")
+    processing_msg = await update.message.reply_text("📸 Photo mil gayi! Scanner active kar raha hoon... ⚙️")
     
     try:
-        # Telegram se photo download karna base64 bytes mein badalne ke liye
+        # 1. Highest resolution photo object fetch karna
         photo_file = await update.message.photo[-1].get_file()
-        image_bytes = await photo_file.download_as_bytearray()
         
-        import base64
-        base64_image = base64.b64encode(image_bytes).decode('utf-8')
+        # 2. Telegram API se strict URL structure taiyar karna
+        # Agar file_path complete URL nahi hai, toh use standard link mein convert karna
+        if photo_file.file_path and photo_file.file_path.startswith("http"):
+            image_url = photo_file.file_path
+        else:
+            image_url = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{photo_file.file_path}"
         
-        # Groq Multimodal Chat Completion API call
+        # 3. Groq Llama-3.2-Vision Engine ko image URL pass karna
         chat_completion = groq_client.chat.completions.create(
             messages=[
                 {
@@ -75,7 +75,7 @@ async def handle_photo_question(update: Update, context: ContextTypes.DEFAULT_TY
                         {
                             "type": "image_url",
                             "image_url": {
-                                "url": f"data:image/jpeg;base64,{base64_image}",
+                                "url": image_url,
                             },
                         },
                     ],
@@ -88,8 +88,8 @@ async def handle_photo_question(update: Update, context: ContextTypes.DEFAULT_TY
         await processing_msg.edit_text(solution_text)
         
     except Exception as e:
-        print(f"Groq Vision Error: {e}")
-        await processing_msg.edit_text("Mujhe is image ko read karne mein problem ho rahi hai 😔. Please ek baar photo clear click karke bhejiyye.")
+        print(f"Vision Full Error Log: {e}")
+        await processing_msg.edit_text("Mujhe is image ko process karne mein abhi thodi dikkat ho rahi hai 😔. Ek baar text mein pooch kar dekhiye!")
 
 def main():
     if not TELEGRAM_BOT_TOKEN:
@@ -102,7 +102,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_question))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo_question))
 
-    print("Hybrid Bot is starting on Railway... 🚀")
+    print("Hybrid URL-based Bot is starting on Railway... 🚀")
     app.run_polling()
 
 if __name__ == "__main__":
