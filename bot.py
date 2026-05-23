@@ -3,14 +3,15 @@ import google.generativeai as genai
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-# --- API KEYS SETUP ---
-TELEGRAM_BOT_TOKEN = "YOUR_TELEGRAM_TOKEN"
-GEMINI_API_KEY = "YOUR_GEMINI_API_KEY"
+# --- API KEYS SETUP (RAILWAY COMPATIBLE) ---
+# Yeh automatic Railway ke "Variables" tab se aapki keys utha lega.
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
+# AI Settings configure karna
 genai.configure(api_key=GEMINI_API_KEY)
 
-# Hum Gemini model ko pehle hi bata rahe hain ki use kaise behave karna hai
-# Yeh aapki "Expert, Emoji aur Diagram" waali requirement poori karega
+# Friendly Expert Tutor Persona Setup
 system_instruction = """
 Aap ek top-tier expert JEE aur NEET tutor hain. Aapka kaam students ke doubts solve karna hai.
 Rules:
@@ -21,7 +22,6 @@ Rules:
 5. Agar koi question mushkil hai, toh use aasan parts mein break karein.
 """
 
-# Gemini 1.5 Flash use karenge kyunki yeh fast hai aur images bhi process karta hai
 model = genai.GenerativeModel(
     model_name="gemini-1.5-flash",
     system_instruction=system_instruction
@@ -41,14 +41,13 @@ async def handle_text_question(update: Update, context: ContextTypes.DEFAULT_TYP
     """Text waale questions ko solve karne ke liye"""
     user_question = update.message.text
     
-    # User ko wait karne ka message
     processing_msg = await update.message.reply_text("🤔 Question analyze kar raha hoon... thoda wait karein ⏳")
     
     try:
-        # Gemini AI se answer maangna
         response = model.generate_content(user_question)
         await processing_msg.edit_text(response.text)
     except Exception as e:
+        print(f"Error: {e}")
         await processing_msg.edit_text("Oops! Kuch technical issue aa gaya 😥. Thodi der baad try karein.")
 
 async def handle_photo_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -56,37 +55,41 @@ async def handle_photo_question(update: Update, context: ContextTypes.DEFAULT_TY
     processing_msg = await update.message.reply_text("📸 Photo mil gayi! Image ko read karke solution nikal raha hoon... ⚙️")
     
     try:
-        # Telegram se highest resolution image download karna
+        # Image download karna
         photo_file = await update.message.photo[-1].get_file()
         file_path = "temp_question.jpg"
         await photo_file.download_to_drive(file_path)
         
-        # Image ko upload karke AI ko bhejna
+        # Image AI ko send karna
         sample_file = genai.upload_file(path=file_path)
-        
         prompt = "Is image mein diye gaye question ko solve karo aur step-by-step explain karo."
         response = model.generate_content([sample_file, prompt])
         
         await processing_msg.edit_text(response.text)
         
         # Temp file delete karna
-        os.remove(file_path)
+        if os.path.exists(file_path):
+            os.remove(file_path)
         
     except Exception as e:
+        print(f"Error: {e}")
         await processing_msg.edit_text("Mujhe is image ko read karne mein problem ho rahi hai 😔. Kya aap thodi clear photo bhej sakte hain?")
 
 def main():
     """Bot ko start karne ka main function"""
-    # Telegram app create karein
+    if not TELEGRAM_BOT_TOKEN:
+        print("Error: TELEGRAM_BOT_TOKEN missing in Environment Variables!")
+        return
+        
+    # Telegram app setup
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-    # Handlers add karein
+    # Handlers (Commands aur Messages)
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_question))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo_question))
 
-    print("Bot is running... 🚀 (Press Ctrl+C to stop)")
-    # Bot ko continuously run karna
+    print("Bot is starting on Railway... 🚀")
     app.run_polling()
 
 if __name__ == "__main__":
