@@ -47,32 +47,37 @@ async def handle_text_question(update: Update, context: ContextTypes.DEFAULT_TYP
         response = model.generate_content(user_question)
         await processing_msg.edit_text(response.text)
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Text Error: {e}")
         await processing_msg.edit_text("Oops! Kuch technical issue aa gaya 😥. Thodi der baad try karein.")
 
 async def handle_photo_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Images (Photo) waale questions ko solve karne ke liye"""
+    """Images (Photo) waale questions ko directly byte data se solve karne ke liye"""
     processing_msg = await update.message.reply_text("📸 Photo mil gayi! Image ko read karke solution nikal raha hoon... ⚙️")
     
     try:
-        # Image download karna
+        # 1. Telegram se highest resolution image ka file object lena
         photo_file = await update.message.photo[-1].get_file()
-        file_path = "temp_question.jpg"
-        await photo_file.download_to_drive(file_path)
         
-        # Image AI ko send karna
-        sample_file = genai.upload_file(path=file_path)
-        prompt = "Is image mein diye gaye question ko solve karo aur step-by-step explain karo."
-        response = model.generate_content([sample_file, prompt])
+        # 2. Image ko server par save karne ke bajaye directly memory (bytes) mein download karna
+        image_bytes = await photo_file.download_as_bytearray()
+        
+        # 3. Gemini ke format mein data taiyar karna
+        image_parts = [
+            {
+                "mime_type": "image/jpeg",
+                "data": bytes(image_bytes)
+            }
+        ]
+        
+        prompt = "Is image mein diye gaye question ko dekho, solve karo aur step-by-step fully explain karo."
+        
+        # 4. Direct content generate karna bina upload_file() use kiye
+        response = model.generate_content([prompt, image_parts[0]])
         
         await processing_msg.edit_text(response.text)
         
-        # Temp file delete karna
-        if os.path.exists(file_path):
-            os.remove(file_path)
-        
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Image processing error: {e}")
         await processing_msg.edit_text("Mujhe is image ko read karne mein problem ho rahi hai 😔. Kya aap thodi clear photo bhej sakte hain?")
 
 def main():
