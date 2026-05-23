@@ -1,5 +1,7 @@
 import os
 import logging
+import io
+import base64
 from groq import Groq
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -18,7 +20,7 @@ system_instruction = """
 Aap ek top-tier expert JEE aur NEET tutor hain. Aapka kaam students ke doubts solve karna hai.
 Rules:
 1. Hamesha friendly aur encouraging tone use karein.
-2. Bahut saare relevant emojis use karein (jaise 🧲, 🧬, 💡, ⚡).
+2. Bahut saare relevant emojis use karein.
 3. Direct answer dene ke bajaye, step-by-step samjhayein.
 """
 
@@ -34,7 +36,6 @@ async def handle_text_question(update: Update, context: ContextTypes.DEFAULT_TYP
     processing_msg = await update.message.reply_text("🤔 Question analyze kar raha hoon... thoda wait karein ⏳")
     
     try:
-        # TYPO FIXED: .completions is now completely joined correctly
         chat_completion = groq_client.chat.completions.create(
             messages=[
                 {"role": "system", "content": system_instruction},
@@ -52,14 +53,21 @@ async def handle_photo_question(update: Update, context: ContextTypes.DEFAULT_TY
     processing_msg = await update.message.reply_text("📸 Photo mil gayi! Scanner active kar raha hoon... ⚙️")
     
     try:
-        # Telegram se async photo URL fetch karna
+        # 1. Telegram se photo download karke memory buffer me rakhna
         photo = update.message.photo[-1]
         file_info = await context.bot.get_file(photo.file_id)
-        image_url = file_info.file_path
+        
+        out = io.BytesIO()
+        await file_info.download_to_memory(out)
+        image_bytes = out.getvalue()
 
-        logging.info(f"Retrieved image URL successfully: {image_url}")
+        # 2. Bytes ko Base64 string me convert karna (Groq isse direct read kar leta hai bina kisi URL ke)
+        base64_image = base64.b64encode(image_bytes).decode('utf-8')
+        data_url = f"data:image/jpeg;base64,{base64_image}"
 
-        # Groq Stable 90B Vision Request for handling image URLs flawlessly
+        logging.info("Image downloaded and converted to Base64 successfully.")
+
+        # 3. Groq Request using Base64 Data URL (100% Safe from Error 400)
         chat_completion = groq_client.chat.completions.create(
             messages=[
                 {"role": "system", "content": system_instruction},
@@ -67,11 +75,11 @@ async def handle_photo_question(update: Update, context: ContextTypes.DEFAULT_TY
                     "role": "user",
                     "content": [
                         {"type": "text", "text": "Is image mein diye gaye JEE/NEET ke question ko dekho, solve karo aur step-by-step fully explain karo."},
-                        {"type": "image_url", "image_url": {"url": image_url}},
+                        {"type": "image_url", "image_url": {"url": data_url}},
                     ],
                 }
             ],
-            model="llama-3.2-90b-vision-preview",
+            model="llama-3.2-11b-vision-preview", # Light & fast model for base64 strings
         )
         
         solution_text = chat_completion.choices[0].message.content
