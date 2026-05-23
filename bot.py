@@ -4,7 +4,7 @@ from groq import Groq
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-# Logging setup taaki Railway dashboard par har activity saaf dikhe
+# Logging setup taaki Railway dashboard par error saaf dikhe
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 # --- API KEYS SETUP ---
@@ -18,15 +18,14 @@ system_instruction = """
 Aap ek top-tier expert JEE aur NEET tutor hain. Aapka kaam students ke doubts solve karna hai.
 Rules:
 1. Hamesha friendly aur encouraging tone use karein.
-2. Bahut saare relevant emojis use karein (jaise 🧲, 🧬, 💡, ⚡).
+2. Bahut saare relevant emojis use karein.
 3. Direct answer dene ke bajaye, step-by-step samjhayein.
 """
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_msg = (
         "Hello! 👋 Main aapka Personal JEE/NEET Expert Tutor hoon! 🎓\n\n"
-        "Aap mujhe apne doubts text mein bhej sakte hain, ya phir question ki photo 📸 bhej sakte hain. "
-        "Aaiye milkar padhai shuru karte hain! 🚀"
+        "Aap mujhe text ya photo mein questions bhej sakte hain. Let's crack it! 🚀"
     )
     await update.message.reply_text(welcome_msg)
 
@@ -52,16 +51,14 @@ async def handle_photo_question(update: Update, context: ContextTypes.DEFAULT_TY
     processing_msg = await update.message.reply_text("📸 Photo mil gayi! Scanner active kar raha hoon... ⚙️")
     
     try:
-        # 1. Telegram highest resolution photo object extract karna
+        # Telegram internal helper se async tareeqe se image path fetch karna
         photo = update.message.photo[-1]
-        
-        # 2. Telegram library ka use karke async tareeqe se file info nikalna (Non-blocking)
         file_info = await context.bot.get_file(photo.file_id)
-        image_url = file_info.file_path  # Yeh automatic direct telegram server ka full HTTP URL deta hai
+        image_url = file_info.file_path
 
-        logging.info(f"Generated Image URL successfully: {image_url}")
+        logging.info(f"Successfully retrieved image URL: {image_url}")
 
-        # 3. Groq Llama Vision API Request via direct web URL
+        # Groq Multimodal Vision API Request
         chat_completion = groq_client.chat.completions.create(
             messages=[
                 {"role": "system", "content": system_instruction},
@@ -88,7 +85,7 @@ def main():
         logging.critical("Error: TELEGRAM_BOT_TOKEN missing!")
         return
         
-    # Modern Application Builder for v21+ Compatibility
+    # Modern Application Builder
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
     # Core Handlers
@@ -96,7 +93,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_question))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo_question))
 
-    logging.info("Master Bot is online and stable on Railway... 🚀")
+    logging.info("Master Bot running via polling... 🚀")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
