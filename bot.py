@@ -18,7 +18,7 @@ system_instruction = """
 Aap ek top-tier expert JEE aur NEET tutor hain. Aapka kaam students ke doubts solve karna hai.
 Rules:
 1. Hamesha friendly aur encouraging tone use karein.
-2. Bahut saare relevant emojis use karein.
+2. Bahut saare relevant emojis use karein (jaise 🧲, 🧬, 💡, ⚡).
 3. Direct answer dene ke bajaye, step-by-step samjhayein.
 """
 
@@ -34,7 +34,8 @@ async def handle_text_question(update: Update, context: ContextTypes.DEFAULT_TYP
     processing_msg = await update.message.reply_text("🤔 Question analyze kar raha hoon... thoda wait karein ⏳")
     
     try:
-        chat_completion = groq_client.chat.com. completions.create(
+        # TYPO FIXED: .completions is now completely joined correctly
+        chat_completion = groq_client.chat.completions.create(
             messages=[
                 {"role": "system", "content": system_instruction},
                 {"role": "user", "content": user_question}
@@ -45,20 +46,20 @@ async def handle_text_question(update: Update, context: ContextTypes.DEFAULT_TYP
         await processing_msg.edit_text(solution_text)
     except Exception as e:
         logging.error(f"Text Error: {e}")
-        await processing_msg.edit_text(f"Oops! Text reply me dikkat hai: {str(e)[:50]}")
+        await processing_msg.edit_text(f"Oops! Technical issue: {str(e)[:50]}")
 
 async def handle_photo_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
     processing_msg = await update.message.reply_text("📸 Photo mil gayi! Scanner active kar raha hoon... ⚙️")
     
     try:
-        # Telegram se full photo URL nikalna
+        # Telegram se async photo URL fetch karna
         photo = update.message.photo[-1]
         file_info = await context.bot.get_file(photo.file_id)
         image_url = file_info.file_path
 
-        logging.info(f"Retrieved image URL: {image_url}")
+        logging.info(f"Retrieved image URL successfully: {image_url}")
 
-        # Groq Heavy Model Request (More Stable for URLs)
+        # Groq Stable 90B Vision Request for handling image URLs flawlessly
         chat_completion = groq_client.chat.completions.create(
             messages=[
                 {"role": "system", "content": system_instruction},
@@ -70,7 +71,7 @@ async def handle_photo_question(update: Update, context: ContextTypes.DEFAULT_TY
                     ],
                 }
             ],
-            model="llama-3.2-90b-vision-preview",  # Upgraded to 90B for better compatibility
+            model="llama-3.2-90b-vision-preview",
         )
         
         solution_text = chat_completion.choices[0].message.content
@@ -78,11 +79,11 @@ async def handle_photo_question(update: Update, context: ContextTypes.DEFAULT_TY
         
     except Exception as e:
         logging.error(f"Vision Error Details: {e}")
-        # Yeh line humein exact error batayegi screen par
         await processing_msg.edit_text(f"Technical Issue details: {str(e)[:60]}")
 
 def main():
     if not TELEGRAM_BOT_TOKEN:
+        logging.critical("TELEGRAM_BOT_TOKEN missing!")
         return
         
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
@@ -91,6 +92,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_question))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo_question))
 
+    logging.info("Master Bot is polling flawlessly... 🚀")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
