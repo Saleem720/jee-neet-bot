@@ -8,7 +8,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-# Groq Engine Initialization
+# Groq Client Initialization
 groq_client = Groq(api_key=GROQ_API_KEY)
 
 system_instruction = """
@@ -52,7 +52,7 @@ async def handle_photo_question(update: Update, context: ContextTypes.DEFAULT_TY
         # 1. Telegram File ID extract karna
         file_id = update.message.photo[-1].file_id
         
-        # 2. Direct Web API requests se File Path fetch karna
+        # 2. Modern Telegram Bot API standard format se direct file info lena
         get_file_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getFile?file_id={file_id}"
         response = requests.get(get_file_url)
         file_info = response.json()
@@ -64,7 +64,7 @@ async def handle_photo_question(update: Update, context: ContextTypes.DEFAULT_TY
         file_path = file_info["result"]["file_path"]
         image_url = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{file_path}"
 
-        # 3. Groq Llama Vision API Request
+        # 3. Groq Llama Vision API Request via direct web URL
         chat_completion = groq_client.chat.completions.create(
             messages=[
                 {"role": "system", "content": system_instruction},
@@ -91,16 +91,16 @@ def main():
         print("Error: TELEGRAM_BOT_TOKEN missing!")
         return
         
-    # Standard v20 Builder Loop
+    # Modern Application Builder for v21+ Compatibility
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-    # Base Core Handlers
+    # Core Handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_question))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo_question))
 
-    print("Master Bot is starting... 🚀")
-    app.run_polling()
+    print("Master Bot is online and stable... 🚀")
+    app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
