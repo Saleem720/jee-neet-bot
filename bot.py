@@ -1,8 +1,11 @@
 import os
-import requests
+import logging
 from groq import Groq
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+
+# Logging setup taaki Railway dashboard par har activity saaf dikhe
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 # --- API KEYS SETUP ---
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -42,27 +45,21 @@ async def handle_text_question(update: Update, context: ContextTypes.DEFAULT_TYP
         solution_text = chat_completion.choices[0].message.content
         await processing_msg.edit_text(solution_text)
     except Exception as e:
-        print(f"Text Error: {e}")
+        logging.error(f"Text Error: {e}")
         await processing_msg.edit_text("Oops! Kuch technical issue aa gaya 😥. Thodi der baad try karein.")
 
 async def handle_photo_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
     processing_msg = await update.message.reply_text("📸 Photo mil gayi! Scanner active kar raha hoon... ⚙️")
     
     try:
-        # 1. Telegram File ID extract karna
-        file_id = update.message.photo[-1].file_id
+        # 1. Telegram highest resolution photo object extract karna
+        photo = update.message.photo[-1]
         
-        # 2. Modern Telegram Bot API standard format se direct file info lena
-        get_file_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getFile?file_id={file_id}"
-        response = requests.get(get_file_url)
-        file_info = response.json()
-        
-        if not file_info.get("ok"):
-            await processing_msg.edit_text("Telegram server se image verify nahi ho pa rahi hai 😔.")
-            return
-            
-        file_path = file_info["result"]["file_path"]
-        image_url = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{file_path}"
+        # 2. Telegram library ka use karke async tareeqe se file info nikalna (Non-blocking)
+        file_info = await context.bot.get_file(photo.file_id)
+        image_url = file_info.file_path  # Yeh automatic direct telegram server ka full HTTP URL deta hai
+
+        logging.info(f"Generated Image URL successfully: {image_url}")
 
         # 3. Groq Llama Vision API Request via direct web URL
         chat_completion = groq_client.chat.completions.create(
@@ -83,12 +80,12 @@ async def handle_photo_question(update: Update, context: ContextTypes.DEFAULT_TY
         await processing_msg.edit_text(solution_text)
         
     except Exception as e:
-        print(f"Vision Error: {e}")
+        logging.error(f"Vision Error: {e}")
         await processing_msg.edit_text("Mujhe is image ko process karne mein abhi thodi dikkat ho rahi hai 😔. Ek baar text mein pooch kar dekhiye!")
 
 def main():
     if not TELEGRAM_BOT_TOKEN:
-        print("Error: TELEGRAM_BOT_TOKEN missing!")
+        logging.critical("Error: TELEGRAM_BOT_TOKEN missing!")
         return
         
     # Modern Application Builder for v21+ Compatibility
@@ -99,7 +96,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_question))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo_question))
 
-    print("Master Bot is online and stable... 🚀")
+    logging.info("Master Bot is online and stable on Railway... 🚀")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
