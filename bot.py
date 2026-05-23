@@ -4,7 +4,7 @@ from groq import Groq
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-# Logging setup taaki Railway dashboard par error saaf dikhe
+# Logging setup for Railway
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 # --- API KEYS SETUP ---
@@ -34,7 +34,7 @@ async def handle_text_question(update: Update, context: ContextTypes.DEFAULT_TYP
     processing_msg = await update.message.reply_text("🤔 Question analyze kar raha hoon... thoda wait karein ⏳")
     
     try:
-        chat_completion = groq_client.chat.completions.create(
+        chat_completion = groq_client.chat.com. completions.create(
             messages=[
                 {"role": "system", "content": system_instruction},
                 {"role": "user", "content": user_question}
@@ -45,20 +45,20 @@ async def handle_text_question(update: Update, context: ContextTypes.DEFAULT_TYP
         await processing_msg.edit_text(solution_text)
     except Exception as e:
         logging.error(f"Text Error: {e}")
-        await processing_msg.edit_text("Oops! Kuch technical issue aa gaya 😥. Thodi der baad try karein.")
+        await processing_msg.edit_text(f"Oops! Text reply me dikkat hai: {str(e)[:50]}")
 
 async def handle_photo_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
     processing_msg = await update.message.reply_text("📸 Photo mil gayi! Scanner active kar raha hoon... ⚙️")
     
     try:
-        # Telegram internal helper se async tareeqe se image path fetch karna
+        # Telegram se full photo URL nikalna
         photo = update.message.photo[-1]
         file_info = await context.bot.get_file(photo.file_id)
         image_url = file_info.file_path
 
-        logging.info(f"Successfully retrieved image URL: {image_url}")
+        logging.info(f"Retrieved image URL: {image_url}")
 
-        # Groq Multimodal Vision API Request
+        # Groq Heavy Model Request (More Stable for URLs)
         chat_completion = groq_client.chat.completions.create(
             messages=[
                 {"role": "system", "content": system_instruction},
@@ -70,30 +70,27 @@ async def handle_photo_question(update: Update, context: ContextTypes.DEFAULT_TY
                     ],
                 }
             ],
-            model="llama-3.2-11b-vision-preview",
+            model="llama-3.2-90b-vision-preview",  # Upgraded to 90B for better compatibility
         )
         
         solution_text = chat_completion.choices[0].message.content
         await processing_msg.edit_text(solution_text)
         
     except Exception as e:
-        logging.error(f"Vision Error: {e}")
-        await processing_msg.edit_text("Mujhe is image ko process karne mein abhi thodi dikkat ho rahi hai 😔. Ek baar text mein pooch kar dekhiye!")
+        logging.error(f"Vision Error Details: {e}")
+        # Yeh line humein exact error batayegi screen par
+        await processing_msg.edit_text(f"Technical Issue details: {str(e)[:60]}")
 
 def main():
     if not TELEGRAM_BOT_TOKEN:
-        logging.critical("Error: TELEGRAM_BOT_TOKEN missing!")
         return
         
-    # Modern Application Builder
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-    # Core Handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_question))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo_question))
 
-    logging.info("Master Bot running via polling... 🚀")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
